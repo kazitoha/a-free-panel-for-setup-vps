@@ -2,20 +2,23 @@
 
 [GitHub](https://github.com/kazitoha/a-free-panel-for-setup-vps) · একটা self-hosted web panel for Ubuntu VPS — Caddy, phpMyAdmin, PowerDNS আর email server (Stalwart) সবকিছু GUI থেকে manage করার জন্য।
 
-A self-hosted control panel for Ubuntu VPS servers. Manage Caddy sites, phpMyAdmin, PowerDNS zones and a Stalwart mail server from one web GUI.
+A self-hosted control panel for Ubuntu VPS servers. Manage Caddy sites, phpMyAdmin, PowerDNS zones, a Stalwart mail server, databases, project deploys, backups and cron jobs from one web GUI.
 
 ## কী কী আছে / Features
 
 | Module | কী করে |
 |---|---|
-| **Dashboard** | Service status (LED strip), CPU load, RAM, disk, public IP, listening ports, service restart |
+| **Dashboard** | Service status (LED strip), CPU load, RAM, disk, public IP, listening ports, service restart, job health checks |
 | **Sites (Caddy)** | Add/edit/remove sites, PHP version, wildcard SSL, on-demand TLS, validate + auto-rollback |
 | **phpMyAdmin** | One-click install + `pma.<panel-domain>` subdomain |
 | **DNS (PowerDNS)** | Zone + record CRUD via the PowerDNS HTTP API, protected NS/panel zones, batch customer-domain import, service restart |
 | **Email (Stalwart)** | Install wizard, mail domain + mailbox create/reset/delete, MX/SPF/DMARC/DKIM auto-records |
 | **Databases** | MySQL database/user create, drop, grant, password reset |
 | **Projects** | GitHub repo → clone, Caddy, Composer, Laravel deploy (domain + PHP version দিলেই) |
-| **Logs** | journalctl viewer, Caddyfile editor |
+| **Logs** | journalctl viewer, Caddyfile editor (validate + rollback) |
+| **Backups** | Per-database `.sql.gz` dumps + per-project `.tar.gz` archives, verified, retention-pruned, schedules (1–24 runs/day) |
+| **Cron jobs** | Panel-managed jobs in `/etc/cron.d/panel` with strict command allowlist + the every-minute backup scheduler tick |
+| **Health** | Dashboard checks: scheduler idle?, last backup/cron run failed?, cron file installed?, disk space |
 
 ## কিভাবে চালাবেন / How to run — নতুন Ubuntu VPS এ (22.04 / 24.04)
 
@@ -66,12 +69,34 @@ Install এর পর:
 3. Panel er `.env` আর passwords (MySQL root, PowerDNS API key, panel admin login) থাকে `/root/.panel-secrets` এ (chmod 600)
 4. DNS module চালাতে চাইলে registrar এ ns1/ns2 দুটোকই `${PDNS_SERVER_IP}` এ point করে দিন
 
+## Backups আর cron
+
+- **Backups** page এ target বেছে schedule বানান — দিনে 1–24 বার (evenly spread), retention 1–90 দিন। Archive যায় `/var/backups/panel/{databases,projects}/` (root-only, 0700); প্রতিটা dump `gzip -t`, project archive `tar tzf` দিয়ে verify হয়, পুরোনো ফাইল retention অনুযায়ী auto-prune হয়।
+- Scheduler tick প্রতি মিনিটে `/etc/cron.d/panel` থেকে চলে (`panel:scheduler:tick`) — কোনো schedule due হলেই backup চালায় আর `next_run_at` এগিয়ে দেয়। Installer এ tick line আগে থেকেই লেখা থাকে।
+- **Cron jobs** page এ command দিন — শুধু allowlist: `run panel:*`, `systemctl <start|stop|restart|reload> <unit>`, `reboot`। প্রতিবার save/toggle/delete করলেই `/etc/cron.d/panel` নতুন করে লেখা হয়; প্রতিটা job এর last run status + output page এ থাকে।
+- Dashboard এর **jobs / health** card দেখায়: cron file ইনস্টলড কিনা, কোনো schedule overdue (scheduler idle) কিনা, শেষ backup/cron run fail কিনা, disk space কত বাকি।
+
+## Google sign-in (ঐচ্ছিক, admin)
+
+1. [console.cloud.google.com](https://console.cloud.google.com) → Credentials → **Create OAuth client ID** (Web application)
+2. Authorized redirect URI: `https://panel.example.com/auth/google/callback`
+3. panel এর `.env` এ বসান আর `php artisan config:clear`:
+
+```dotenv
+GOOGLE_CLIENT_ID=xxxxxxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxx
+```
+
+`.env` এ দুটো value থাকলেই login page এ **Sign in with Google** button দেখাবে। শুধু যার email আগে থেকেই panel user হিসেবে আছে সেই Google account দিয়ে sign in করা যাবে (প্রথম successful sign-in এ `google_id` link হয়ে যায়); অন্য Google account এর জন্য পাওয়া যাবে না। Google login ছাড়াও password login আগের মতোই থাকবে।
+
 ## নিরাপত্তা / Security model
 
 - Panel code **root-owned** থাকে — web user (www-data) code modify করতে পারে না
 - www-data শুধু `sudo -n /usr/local/panel/run panel:*` চালাতে পারে — root-owned wrapper strict allowlist যাচাই করে, arbitrary shell নেই
 - প্রতিটা privileged command input validate করে (service unit allowlist, domain regex, PHP version enum)
 - Caddyfile এর আগে backup, `caddy validate` fail করলে auto-rollback
+- Cron jobs: শুধু `run panel:*`, `systemctl <start|stop|restart|reload> <unit>`, `reboot` — shell metacharacter নিষিদ্ধ, `/etc/cron.d/panel` প্রতিবার panel নিজেই লেখে
+- Backups: `/var/backups/panel` root-only (0700), প্রতিটা archive `gzip -t`/`tar tzf` দিয়ে verify, retention দিয়ে auto-prune
 - UFW: SSH + 80 + 443 + 53 (DNS) ছাড়া সব blocked
 - Admin login: session auth + login throttle
 
@@ -96,7 +121,7 @@ Verify:
 
 ```bash
 vendor/bin/pint --format agent   # code style
-php artisan test --compact       # PHPUnit (125 tests)
+php artisan test --compact       # PHPUnit (231 tests)
 ```
 
 ## Structure
@@ -119,4 +144,6 @@ Phase 0 (এই ভাল্সন): auth + dashboard + installer + sudo runner 
 Phase 1 (এই ভাল্সন): Caddy sites + phpMyAdmin ✅
 Phase 2 (এই ভাল্সন): PowerDNS zones + records ✅
 Phase 3 (এই ভাল্সন): Stalwart email ✅
-Phase 4: Databases + Projects + Logs
+Phase 4 (এই ভাল্সন): Databases + Projects + Logs ✅
+Phase 5 (এই ভাল্সন): Backups + cron schedules + health checks ✅
+Phase 6: Google login (admin)

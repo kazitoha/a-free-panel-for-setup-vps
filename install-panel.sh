@@ -186,6 +186,15 @@ fi
 # System packages
 # ---------------------------------------------------------------
 
+# An earlier run may have added the Caddy Cloudsmith repository. Cloudsmith
+# now answers HTTP 402 for it, which makes every `apt-get update` fail.
+if [[ -f /etc/apt/sources.list.d/caddy-stable.list ]] \
+    && grep -qF "dl.cloudsmith.io/public/caddy" /etc/apt/sources.list.d/caddy-stable.list; then
+    info "Removing broken Caddy Cloudsmith repository..."
+    rm -f /etc/apt/sources.list.d/caddy-stable.list \
+        /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+fi
+
 info "Updating package index..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
@@ -222,13 +231,42 @@ fi
 
 if ! command -v caddy >/dev/null 2>&1; then
     info "Installing Caddy..."
-    apt-get install -y -qq debian-keyring debian-archive-keyring
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-        | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-        > /etc/apt/sources.list.d/caddy-stable.list
-    apt-get update -qq
-    apt-get install -y -qq caddy
+
+    # The Cloudsmith APT repository behind Caddy's official install docs now
+    # returns 402 Payment Required, so fetch the signed release package from
+    # GitHub instead.
+    CADDY_ARCH="$(dpkg --print-architecture)"
+    case "$CADDY_ARCH" in
+        amd64|arm64|ppc64le|riscv64|s390x) ;;
+        armhf) CADDY_ARCH="armv7" ;;
+        armel) CADDY_ARCH="armv6" ;;
+        *)     fail "Unsupported architecture for Caddy: ${CADDY_ARCH}" ;;
+    esac
+
+    CADDY_TAG="$(curl -fsSLI https://github.com/caddyserver/caddy/releases/latest \
+        | tr -d '\r' \
+        | awk 'tolower($1) == "location:" {url = $2} END {print url}' \
+        | sed 's|.*/tag/||')"
+    [[ "$CADDY_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+        || fail "Could not determine the latest Caddy release tag."
+
+    CADDY_VERSION="${CADDY_TAG#v}"
+    CADDY_DEB="caddy_${CADDY_VERSION}_linux_${CADDY_ARCH}.deb"
+    CADDY_RELEASE="https://github.com/caddyserver/caddy/releases/download/${CADDY_TAG}"
+    CADDY_TMP="$(mktemp -d)"
+    trap 'rm -rf "$CADDY_TMP"' EXIT
+
+    curl -fsSL -o "${CADDY_TMP}/${CADDY_DEB}" "${CADDY_RELEASE}/${CADDY_DEB}"
+    curl -fsSL -o "${CADDY_TMP}/checksums.txt" "${CADDY_RELEASE}/caddy_${CADDY_VERSION}_checksums.txt"
+
+    if ! (cd "$CADDY_TMP" \
+        && awk -v name="$CADDY_DEB" '$2 == name' checksums.txt | sha512sum -c - >/dev/null); then
+        fail "Checksum verification failed for ${CADDY_DEB}."
+    fi
+
+    apt-get install -y -qq "${CADDY_TMP}/${CADDY_DEB}"
+    rm -rf "$CADDY_TMP"
+    trap - EXIT
 fi
 
 if ! command -v node >/dev/null 2>&1; then
@@ -560,6 +598,7 @@ composer install --quiet --no-dev --optimize-autoloader --no-interaction --worki
 info "Writing .env..."
 EXISTING_KEY=""
 EXISTING_STALWART=()
+EXISTING_GOOGLE=()
 if [[ -f "$PANEL_DIR/.env" ]]; then
     EXISTING_KEY="$(grep -E '^APP_KEY=.+' "$PANEL_DIR/.env" | head -1 | cut -d= -f2- || true)"
     # The Email module writes STALWART_* credentials once Stalwart is
@@ -567,6 +606,8 @@ if [[ -f "$PANEL_DIR/.env" ]]; then
     # backticks, so they are appended after the heredoc instead of
     # being interpolated into it).
     mapfile -t EXISTING_STALWART < <(grep -E '^STALWART_(URL|USER|PASSWORD|HOST)=' "$PANEL_DIR/.env" || true)
+    # Optional Google sign-in credentials configured by the admin.
+    mapfile -t EXISTING_GOOGLE < <(grep -E '^GOOGLE_(CLIENT_ID|CLIENT_SECRET)=' "$PANEL_DIR/.env" || true)
 fi
 
 rm -f "$PANEL_DIR/.env"
@@ -608,6 +649,7 @@ MAIL_FROM_NAME="\${APP_NAME}"
 
 PANEL_DOMAIN=${PANEL_DOMAIN}
 PANEL_PHP=${PHP_VERSION}
+PANEL_UPDATE_BRANCH=${BRANCH}
 MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
 PDNS_API_URL=${PDNS_API_URL}
 PDNS_API_KEY=${PDNS_API_KEY}
@@ -616,6 +658,9 @@ PDNS_SERVER_IP=${PDNS_SERVER_IP}
 EOF
 if ((${#EXISTING_STALWART[@]})); then
     printf '%s\n' "${EXISTING_STALWART[@]}" >> "$PANEL_DIR/.env"
+fi
+if ((${#EXISTING_GOOGLE[@]})); then
+    printf '%s\n' "${EXISTING_GOOGLE[@]}" >> "$PANEL_DIR/.env"
 fi
 chmod 640 "$PANEL_DIR/.env"
 
@@ -631,6 +676,19 @@ fi
 info "Running migrations..."
 php artisan migrate --force --no-interaction
 php artisan storage:link --no-interaction >/dev/null 2>&1 || true
+
+# Backup storage for panel:backup:* plus the scheduler tick in
+# /etc/cron.d/panel (runs due backup schedules every minute).
+install -d -m 700 -o root -g root /var/backups/panel
+if ! php artisan panel:cron:sync --no-interaction; then
+    warn "Could not write /etc/cron.d/panel — backup schedules will not run until 'php artisan panel:cron:sync' succeeds."
+fi
+
+# Seed the update status file so the dashboard knows which commit is running
+# (the hourly cron line takes over from here).
+if ! php artisan panel:update:check --no-interaction; then
+    warn "Could not check for panel updates — the hourly cron check will retry."
+fi
 
 info "Creating administrator ${ADMIN_EMAIL}..."
 php artisan panel:admin:create "$ADMIN_EMAIL" \

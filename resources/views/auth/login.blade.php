@@ -49,6 +49,18 @@
 
                 <button type="submit" class="btn-primary w-full justify-center">Sign in</button>
             </form>
+
+            @if ($googleEnabled)
+                <div class="my-4 flex items-center gap-3" aria-hidden="true">
+                    <span class="h-px flex-1 bg-slate-800"></span>
+                    <span class="eyebrow">or</span>
+                    <span class="h-px flex-1 bg-slate-800"></span>
+                </div>
+
+                <a href="{{ route('auth.google') }}" class="btn-ghost w-full justify-center">
+                    Sign in with Google
+                </a>
+            @endif
         </div>
 
         <p class="mt-4 font-mono text-[11px] uppercase tracking-widest text-slate-600">

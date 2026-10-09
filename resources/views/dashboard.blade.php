@@ -30,6 +30,10 @@
                 <span class="mono-chip" title="Public IPv4">{{ $system['public_ip'] }}</span>
             @endif
             <a href="{{ route('dashboard') }}" class="btn-ghost">Refresh</a>
+            <form method="POST" action="{{ route('update.check') }}">
+                @csrf
+                <button type="submit" class="btn-ghost">Check updates</button>
+            </form>
         </div>
     </header>
 
@@ -65,6 +69,34 @@
                 @endforeach
             </ul>
         @endif
+    </section>
+
+    {{-- Job health --}}
+    <section class="card mb-6 p-5" aria-label="Job health">
+        <div class="mb-4 flex items-center justify-between gap-4">
+            <p class="eyebrow">jobs / health</p>
+            <a href="{{ route('backups.index') }}" class="font-mono text-xs text-amber-400 hover:underline">
+                backups →
+            </a>
+        </div>
+
+        <ul class="grid gap-3 sm:grid-cols-2">
+            @foreach ($health as $check)
+                <li class="flex items-start gap-3 rounded-lg border border-slate-800 bg-[#0a101c] px-3.5 py-3">
+                    <span class="led led--{{ $check['status'] === 'ok' ? 'active' : ($check['status'] === 'warn' ? 'reloading' : 'failed') }}"
+                          aria-hidden="true"></span>
+                    <div class="min-w-0">
+                        <p class="flex items-center gap-2 truncate font-mono text-sm font-medium text-slate-200">
+                            {{ $check['label'] }}
+                            <span class="badge badge-{{ $check['status'] === 'ok' ? 'green' : ($check['status'] === 'warn' ? 'amber' : 'red') }}">
+                                {{ $check['status'] }}
+                            </span>
+                        </p>
+                        <p class="mt-1 text-xs leading-relaxed text-slate-500">{{ $check['detail'] }}</p>
+                    </div>
+                </li>
+            @endforeach
+        </ul>
     </section>
 
     {{-- Resource meters --}}

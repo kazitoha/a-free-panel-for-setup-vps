@@ -24,11 +24,12 @@ class SiteSpec
      * Validate and normalize a site specification.
      *
      * @param  array<string, mixed>  $input
+     * @param  string  $wwwDir  Root directory every document root must live under
      * @return array{domain: string, wildcard: bool, type: string, php_version: ?string, docroot: ?string, target: ?string}
      *
      * @throws InvalidSiteSpec
      */
-    public static function validate(array $input): array
+    public static function validate(array $input, string $wwwDir = '/var/www'): array
     {
         $errors = [];
 
@@ -71,14 +72,15 @@ class SiteSpec
 
         // --- document root ------------------------------------------------
         $docroot = trim((string) ($input['docroot'] ?? ''));
+        $wwwDir = rtrim($wwwDir, '/');
 
         if (in_array($type, ['php', 'static'], true)) {
             if ($docroot === '') {
                 $errors['docroot'] = 'Document root is required.';
             } elseif (strlen($docroot) > 400
-                || preg_match('#^/var/www/[A-Za-z0-9._/-]+$#', $docroot) !== 1
+                || preg_match('#^'.preg_quote($wwwDir, '#').'/[A-Za-z0-9._/-]+$#', $docroot) !== 1
                 || str_contains($docroot, '..')) {
-                $errors['docroot'] = 'Document root must live under /var/www (letters, digits, dot, underscore, hyphen and slash only).';
+                $errors['docroot'] = "Document root must live under {$wwwDir} (letters, digits, dot, underscore, hyphen and slash only).";
             }
         } else {
             $docroot = null;

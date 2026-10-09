@@ -15,12 +15,14 @@ class HostCommand
      * Run a command and capture its result without throwing on failure.
      *
      * @param  list<string>  $command
+     * @param  array<string, string>|null  $env  Extra environment variables merged into the process.
+     * @param  string|null  $cwd  Working directory for the process.
      * @return array{exit: int, stdout: string, stderr: string}
      */
-    public function run(array $command, float $timeout = 60.0): array
+    public function run(array $command, float $timeout = 60.0, ?array $env = null, ?string $cwd = null): array
     {
         try {
-            $process = new Process($command);
+            $process = new Process($command, $cwd, $env);
             $process->setTimeout($timeout);
 
             try {

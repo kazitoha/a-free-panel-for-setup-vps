@@ -43,11 +43,28 @@
                class="nav-link {{ request()->routeIs('mail.*') ? 'nav-link-active' : '' }}">
                 <span aria-hidden="true">✉</span> Email
             </a>
-            <span class="nav-link nav-link-disabled"><span aria-hidden="true">⛃</span> Databases <em class="soon">soon</em></span>
-            <span class="nav-link nav-link-disabled"><span aria-hidden="true">⇪</span> Projects <em class="soon">soon</em></span>
+            <a href="{{ route('databases.index') }}"
+               class="nav-link {{ request()->routeIs('databases.*') ? 'nav-link-active' : '' }}">
+                <span aria-hidden="true">⛃</span> Databases
+            </a>
+            <a href="{{ route('projects.index') }}"
+               class="nav-link {{ request()->routeIs('projects.*') ? 'nav-link-active' : '' }}">
+                <span aria-hidden="true">⇪</span> Projects
+            </a>
+            <a href="{{ route('backups.index') }}"
+               class="nav-link {{ request()->routeIs('backups.*') ? 'nav-link-active' : '' }}">
+                <span aria-hidden="true">⛁</span> Backups
+            </a>
 
             <p class="eyebrow px-3 pb-2 pt-5">system</p>
-            <span class="nav-link nav-link-disabled"><span aria-hidden="true">≡</span> Logs <em class="soon">soon</em></span>
+            <a href="{{ route('logs.index') }}"
+               class="nav-link {{ request()->routeIs('logs.*') ? 'nav-link-active' : '' }}">
+                <span aria-hidden="true">≡</span> Logs
+            </a>
+            <a href="{{ route('cron.index') }}"
+               class="nav-link {{ request()->routeIs('cron.*') ? 'nav-link-active' : '' }}">
+                <span aria-hidden="true">⏱</span> Cron jobs
+            </a>
             <span class="nav-link nav-link-disabled"><span aria-hidden="true">⚙</span> Settings <em class="soon">soon</em></span>
 
             <div class="mt-auto border-t border-slate-800 p-3">
@@ -74,6 +91,7 @@
 
         <main class="mx-auto w-full max-w-6xl flex-1 p-4 sm:p-6 lg:p-8">
             @include('partials.flash')
+            @include('partials.update-alert')
             @yield('content')
         </main>
 
@@ -103,5 +121,6 @@
         backdrop.addEventListener('click', function () { setOpen(false); });
     })();
 </script>
+@yield('scripts')
 </body>
 </html>

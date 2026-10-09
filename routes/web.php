@@ -1,15 +1,21 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BackupController;
 use App\Http\Controllers\CaddySiteController;
+use App\Http\Controllers\CronController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DatabaseController;
 use App\Http\Controllers\DnsController;
 use App\Http\Controllers\DnsRecordController;
 use App\Http\Controllers\InstallController;
+use App\Http\Controllers\LogsController;
 use App\Http\Controllers\MailboxController;
 use App\Http\Controllers\MailController;
 use App\Http\Controllers\PmaController;
+use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ServiceController;
+use App\Http\Controllers\UpdateController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('guest')->group(function () {
@@ -17,6 +23,12 @@ Route::middleware('guest')->group(function () {
     Route::post('/login', [AuthController::class, 'login'])
         ->middleware('throttle:5,1')
         ->name('login.attempt');
+    Route::get('/login/google', [AuthController::class, 'redirectToGoogle'])
+        ->middleware('throttle:10,1')
+        ->name('auth.google');
+    Route::get('/auth/google/callback', [AuthController::class, 'handleGoogleCallback'])
+        ->middleware('throttle:10,1')
+        ->name('auth.google.callback');
 });
 
 Route::middleware('auth')->group(function () {
@@ -89,6 +101,83 @@ Route::middleware('auth')->group(function () {
             ->where(['domain' => '[0-9]+', 'mailbox' => '[0-9]+'])
             ->name('mailboxes.destroy');
     });
+
+    Route::prefix('databases')->name('databases.')->group(function () {
+        Route::get('/', [DatabaseController::class, 'index'])->name('index');
+        Route::post('/', [DatabaseController::class, 'store'])
+            ->middleware('throttle:10,1')
+            ->name('store');
+        Route::get('/{database}/credentials', [DatabaseController::class, 'credentials'])
+            ->name('credentials');
+        Route::post('/{database}/password', [DatabaseController::class, 'password'])
+            ->name('password');
+        Route::delete('/{database}', [DatabaseController::class, 'destroy'])
+            ->name('destroy');
+    });
+
+    Route::prefix('logs')->name('logs.')->group(function () {
+        Route::get('/', [LogsController::class, 'index'])->name('index');
+        Route::post('/caddyfile', [LogsController::class, 'saveCaddyfile'])
+            ->middleware('throttle:10,1')
+            ->name('caddyfile');
+    });
+
+    Route::prefix('projects')->name('projects.')->group(function () {
+        Route::get('/', [ProjectController::class, 'index'])->name('index');
+        Route::get('/create', [ProjectController::class, 'create'])->name('create');
+        Route::post('/', [ProjectController::class, 'store'])
+            ->middleware('throttle:10,1')
+            ->name('store');
+        Route::post('/{project}/deploy', [ProjectController::class, 'deploy'])
+            ->whereNumber('project')
+            ->middleware('throttle:10,1')
+            ->name('deploy');
+        Route::delete('/{project}', [ProjectController::class, 'destroy'])
+            ->whereNumber('project')
+            ->middleware('throttle:10,1')
+            ->name('destroy');
+    });
+
+    Route::prefix('backups')->name('backups.')->group(function () {
+        Route::get('/', [BackupController::class, 'index'])->name('index');
+        Route::post('/', [BackupController::class, 'store'])
+            ->middleware('throttle:10,1')
+            ->name('store');
+        Route::post('/{schedule}/run', [BackupController::class, 'run'])
+            ->whereNumber('schedule')
+            ->middleware('throttle:5,1')
+            ->name('run');
+        Route::post('/{schedule}/toggle', [BackupController::class, 'toggle'])
+            ->whereNumber('schedule')
+            ->name('toggle');
+        Route::delete('/{schedule}', [BackupController::class, 'destroy'])
+            ->whereNumber('schedule')
+            ->name('destroy');
+    });
+
+    Route::prefix('cron')->name('cron.')->group(function () {
+        Route::get('/', [CronController::class, 'index'])->name('index');
+        Route::post('/', [CronController::class, 'store'])
+            ->middleware('throttle:10,1')
+            ->name('store');
+        Route::post('/{job}/toggle', [CronController::class, 'toggle'])
+            ->whereNumber('job')
+            ->name('toggle');
+        Route::post('/{job}/run', [CronController::class, 'run'])
+            ->whereNumber('job')
+            ->middleware('throttle:5,1')
+            ->name('run');
+        Route::delete('/{job}', [CronController::class, 'destroy'])
+            ->whereNumber('job')
+            ->name('destroy');
+    });
+
+    Route::post('/update/check', [UpdateController::class, 'check'])
+        ->middleware('throttle:5,1')
+        ->name('update.check');
+    Route::post('/update/run', [UpdateController::class, 'run'])
+        ->middleware('throttle:2,1')
+        ->name('update.run');
 
     Route::get('/phpmyadmin', [PmaController::class, 'index'])->name('pma.index');
     Route::post('/phpmyadmin/install', [PmaController::class, 'install'])

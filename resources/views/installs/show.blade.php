@@ -19,7 +19,9 @@
         </div>
 
         <div class="flex gap-2">
-            @if ($install->type === 'pma')
+            @if ($install->type === 'update')
+                <a href="{{ route('dashboard') }}" class="btn-ghost">Back to Dashboard</a>
+            @elseif ($install->type === 'pma')
                 <a href="{{ route('pma.index') }}" class="btn-ghost">Back to phpMyAdmin</a>
             @else
                 <a href="{{ route('caddy.index') }}" class="btn-ghost">Back to Sites</a>
