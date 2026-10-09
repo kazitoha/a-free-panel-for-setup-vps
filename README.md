@@ -38,6 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/kazitoha/a-free-panel-for-setup-vps
 - `--password` দিলে সেটাই admin password হবে; না দিলে random generate হবে। ইনস্টল শেষ হওয়ার পর output এর সবার শেষে login URL আর email/password দেখানো হয়
 - piped mode এ prompt চালু থাকলেও নেই (`curl | bash` এ stdin = script, তাই installer নিজেই non-interactive ধরে নেয়)
 - আগে থেকেই `/var/www/panel` এ panel থাকলে installer জিজ্ঞেস করে কী করবে — **update** (ডিফল্ট: থকেই রেখে fast-forward), **overwrite** (পুরো project মুছে নতুন করে ইনস্টল; আগে `.env` আর database `/root/panel-backups/overwrite-<time>` এ backup নেয়), **skip** (code যেমন আছে তেমনই রাখবে)। শেষ দুটোর জন্য piped mode এ `--code=overwrite` / `--code=skip` দিতে হবে
+- `--repo` এ full URL দিতে হবে (`https://github.com/…`, `git@host:path` বা local path)। `owner/repo` shorthand দিলে installer আগেই থেমে গিয়ে ঠিক কী লিখবে দেখিয়ে দেয় (যেমন `--repo=https://github.com/owner/repo`)
 - Admin credential পরেও পাওয়া যায়: `/root/.panel-secrets` এ `PANEL_ADMIN_EMAIL` / `PANEL_ADMIN_PASSWORD` লেখা থাকে (chmod 600)
 
 বিকল্প: script download করে চালাতে চাইলে (interactive wizard):

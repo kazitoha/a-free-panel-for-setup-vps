@@ -121,6 +121,16 @@ prompt_secret() {
 
 [[ "${EUID}" -eq 0 ]] || fail "Run this script as root: sudo bash install-panel.sh"
 
+# Every sudo call prints "unable to resolve host …" when the machine's
+# hostname is missing from /etc/hosts (common on fresh VPS images).
+HOST_SHORT="$(hostname 2>/dev/null || true)"
+if [[ -n "$HOST_SHORT" ]] \
+    && ! getent hosts "$HOST_SHORT" >/dev/null 2>&1 \
+    && ! grep -qE "(^|[[:space:]])${HOST_SHORT}([[:space:]]|$)" /etc/hosts; then
+    printf '127.0.0.1 %s\n' "$HOST_SHORT" >> /etc/hosts
+    info "Mapped ${HOST_SHORT} to 127.0.0.1 in /etc/hosts."
+fi
+
 if [[ -f /etc/os-release ]]; then
     # shellcheck disable=SC1091
     source /etc/os-release
@@ -236,6 +246,22 @@ CODE_ACTION="${CODE_ACTION:-update}"
 if [[ "$CODE_ACTION" == "skip" && "$PANEL_EXISTS" -eq 0 ]]; then
     warn "--code=skip: there is no panel at ${PANEL_DIR} — installing it instead."
     CODE_ACTION="update"
+fi
+
+# A shorthand such as owner/repo.git is not something git can clone. Catch it
+# here, before the run gets halfway through, and say what a full URL looks like.
+if [[ "$MODE" == "git" && -n "$REPO_URL" ]] \
+    && ! [[ "$REPO_URL" =~ ^[a-zA-Z][a-zA-Z0-9+.-]*:// ]] \
+    && ! [[ "$REPO_URL" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:.+ ]] \
+    && ! [[ "$REPO_URL" =~ ^(\.?/|~) ]]; then
+    if [[ -d "$PANEL_DIR/.git" && "$CODE_ACTION" != "overwrite" ]]; then
+        warn "--repo '${REPO_URL}' is not a repository URL — ignoring it, ${PANEL_DIR} is an existing checkout."
+        REPO_URL=""
+    elif [[ "$REPO_URL" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(\.git)?$ ]]; then
+        fail "--repo must be a full URL — try --repo=https://github.com/${REPO_URL}"
+    else
+        fail "--repo must be a repository URL (https://…, git@host:path or a local path) — got: ${REPO_URL}"
+    fi
 fi
 
 # ---------------------------------------------------------------
@@ -577,6 +603,7 @@ CREATE TABLE IF NOT EXISTS tsigkeys (
   name                  VARCHAR(255),
   algorithm             VARCHAR(50),
   secret                VARCHAR(255),
+  PRIMARY KEY (id),
   UNIQUE KEY name_algo_index (name, algorithm)
 ) Engine=InnoDB;
 SQL
