@@ -1,6 +1,6 @@
 # VPS Panel
 
-একটা self-hosted web panel for Ubuntu VPS — Caddy, phpMyAdmin, PowerDNS আর email server (Stalwart) সবকিছু GUI থেকে manage করার জন্য।
+[GitHub](https://github.com/kazitoha/a-free-panel-for-setup-vps) · একটা self-hosted web panel for Ubuntu VPS — Caddy, phpMyAdmin, PowerDNS আর email server (Stalwart) সবকিছু GUI থেকে manage করার জন্য।
 
 A self-hosted control panel for Ubuntu VPS servers. Manage Caddy sites, phpMyAdmin, PowerDNS zones and a Stalwart mail server from one web GUI.
 
@@ -17,14 +17,14 @@ A self-hosted control panel for Ubuntu VPS servers. Manage Caddy sites, phpMyAdm
 | **Projects** | GitHub repo → clone, Caddy, Composer, Laravel deploy (domain + PHP version দিলেই) |
 | **Logs** | journalctl viewer, Caddyfile editor |
 
-## Install — নতুন Ubuntu VPS এ (22.04 / 24.04)
+## কিভাবে চালাবেন / How to run — নতুন Ubuntu VPS এ (22.04 / 24.04)
 
-আগে DNS এ A record বসান: `panel.example.com → VPS_IP`। তারপর একটাই command — download, full setup আর admin login credential একসাথে set হয়ে যাবে:
+আগে DNS এ A record বসান: `panel.example.com → VPS_IP`। তারপর VPS এ ssh করে একটাই command — panel download, full setup আর admin login credential একসাথে set হয়ে যাবে:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<you>/<repo>/main/install-panel.sh \
+curl -fsSL https://raw.githubusercontent.com/kazitoha/a-free-panel-for-setup-vps/main/install-panel.sh \
   | sudo bash -s -- \
-      --repo=https://github.com/<you>/<repo>.git \
+      --repo=https://github.com/kazitoha/a-free-panel-for-setup-vps.git \
       --domain=panel.example.com \
       --email=you@example.com \
       --password='strong-password' \
@@ -40,7 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/<you>/<repo>/main/install-panel.sh 
 
 ```bash
 ssh root@VPS_IP
-curl -o /tmp/install-panel.sh https://raw.githubusercontent.com/<you>/<repo>/main/install-panel.sh
+curl -o /tmp/install-panel.sh https://raw.githubusercontent.com/kazitoha/a-free-panel-for-setup-vps/main/install-panel.sh
 sudo bash /tmp/install-panel.sh
 ```
 
@@ -54,7 +54,7 @@ sudo bash install-panel.sh \
   --domain=panel.example.com \
   --email=you@example.com \
   --password='strong-password' \
-  --repo=https://github.com/<you>/<repo>.git \
+  --repo=https://github.com/kazitoha/a-free-panel-for-setup-vps.git \
   --ns-domain=example.com \
   --non-interactive
 ```
@@ -75,9 +75,12 @@ Install এর পর:
 - UFW: SSH + 80 + 443 + 53 (DNS) ছাড়া সব blocked
 - Admin login: session auth + login throttle
 
-## Development
+## কিভাবে চালাবেন (local development)
 
 ```bash
+git clone https://github.com/kazitoha/a-free-panel-for-setup-vps.git
+cd a-free-panel-for-setup-vps
+
 composer install
 cp .env.example .env
 php artisan key:generate
@@ -86,6 +89,8 @@ php artisan panel:admin:create you@example.com --password=secret123
 npm install && npm run build     # অথবা npm run dev
 php artisan serve                # http://127.0.0.1:8000
 ```
+
+Login: `you@example.com` / `secret123` → `http://127.0.0.1:8000/login`
 
 Verify:
 
@@ -115,4 +120,3 @@ Phase 1 (এই ভাল্সন): Caddy sites + phpMyAdmin ✅
 Phase 2 (এই ভাল্সন): PowerDNS zones + records ✅
 Phase 3 (এই ভাল্সন): Stalwart email ✅
 Phase 4: Databases + Projects + Logs
-# a-free-panel-for-setup-vps
