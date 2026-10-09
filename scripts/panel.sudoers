@@ -1,0 +1,4 @@
+# Managed by install-panel.sh — allows the panel web user to run
+# allowlisted panel:* artisan commands as root through the runner.
+# Installed to /etc/sudoers.d/panel and validated with visudo -cf.
+www-data ALL=(root) NOPASSWD: /usr/local/panel/run
