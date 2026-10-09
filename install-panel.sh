@@ -26,6 +26,8 @@ ADMIN_EMAIL=""
 ADMIN_PASSWORD=""
 PDNS_NS_DOMAIN=""
 MODE=""
+CODE_ACTION=""
+OVERWRITE_BACKUP_DIR=""
 
 # Works both from a checkout and piped (curl … | bash), where BASH_SOURCE is unset.
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
@@ -45,6 +47,10 @@ Options:
   --password=PASS    Administrator password (generated when omitted)
   --repo=URL         Git repository to install from
   --branch=NAME      Git branch (default: main)
+  --code=ACTION      When a panel already exists: update (default) — keep it and
+                     fast-forward; overwrite — delete the project and install
+                     fresh (files are backed up first); skip — leave the
+                     existing code untouched
   --php=VERSION      PHP version to install (default: 8.3)
   --ns-domain=HOST   Nameserver domain for the DNS module (default: panel domain)
   --local            Install from the directory containing this script
@@ -60,6 +66,7 @@ for argument in "$@"; do
         --password=*)     ADMIN_PASSWORD="${argument#*=}" ;;
         --repo=*)         REPO_URL="${argument#*=}" ;;
         --branch=*)       BRANCH="${argument#*=}" ;;
+        --code=*)         CODE_ACTION="${argument#*=}" ;;
         --php=*)          PHP_VERSION="${argument#*=}" ;;
         --ns-domain=*)    PDNS_NS_DOMAIN="${argument#*=}" ;;
         --local)          MODE="local" ;;
@@ -126,6 +133,8 @@ fi
 [[ "$PHP_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || fail "Invalid --php value: $PHP_VERSION"
 [[ -z "$PANEL_DOMAIN" || "$PANEL_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || fail "Invalid --domain value: $PANEL_DOMAIN"
 [[ -z "$PDNS_NS_DOMAIN" || "$PDNS_NS_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || fail "Invalid --ns-domain value: $PDNS_NS_DOMAIN"
+[[ -z "$CODE_ACTION" || "$CODE_ACTION" =~ ^(update|overwrite|skip)$ ]] \
+    || fail "Invalid --code value: $CODE_ACTION (use update, overwrite or skip)."
 
 if [[ "$NON_INTERACTIVE" == "1" ]]; then
     [[ -n "$PANEL_DOMAIN" ]] || fail "--domain is required in non-interactive mode."
@@ -180,6 +189,53 @@ if [[ "$MODE" == "git" && -z "$REPO_URL" ]]; then
     fi
     prompt REPO_URL "Panel git repository URL"
     [[ -n "$REPO_URL" ]] || fail "Repository URL is required."
+fi
+
+# ---------------------------------------------------------------
+# Existing installation
+# ---------------------------------------------------------------
+
+# An earlier install leaves a populated /var/www/panel. The administrator
+# decides up front — before any package is touched — whether this run keeps it
+# (update), wipes it (overwrite) or leaves the code alone (skip).
+PANEL_EXISTS=0
+if [[ -d "$PANEL_DIR" && -n "$(ls -A "$PANEL_DIR" 2>/dev/null || true)" ]]; then
+    PANEL_EXISTS=1
+fi
+
+if [[ "$PANEL_EXISTS" -eq 1 && -z "$CODE_ACTION" ]]; then
+    if [[ "$NON_INTERACTIVE" == "1" ]]; then
+        CODE_ACTION="update"
+        info "Existing panel found at ${PANEL_DIR} — updating it in place (use --code=overwrite or --code=skip to change that)."
+    else
+        info "Existing panel installation found at ${PANEL_DIR}."
+        echo "  update    keep everything and fast-forward the code (default)"
+        echo "  overwrite delete the project and install fresh (backed up first)"
+        echo "  skip      leave the existing code untouched"
+        __code="" __answer=""
+        while [[ -z "$__code" ]]; do
+            read -r -p "What should I do with it? [update]: " __answer || true
+            __answer="${__answer,,}"
+            __answer="${__answer//[[:space:]]/}"
+            __answer="${__answer:-update}"
+            case "$__answer" in
+                u|up|update)    __code="update" ;;
+                o|ov|overwrite) __code="overwrite" ;;
+                s|sk|skip)      __code="skip" ;;
+                *)              echo "Please answer update, overwrite or skip." ;;
+            esac
+        done
+        CODE_ACTION="$__code"
+        unset __code __answer
+    fi
+fi
+
+# Nothing to keep or wipe: a first install behaves like an update.
+CODE_ACTION="${CODE_ACTION:-update}"
+
+if [[ "$CODE_ACTION" == "skip" && "$PANEL_EXISTS" -eq 0 ]]; then
+    warn "--code=skip: there is no panel at ${PANEL_DIR} — installing it instead."
+    CODE_ACTION="update"
 fi
 
 # ---------------------------------------------------------------
@@ -279,8 +335,26 @@ fi
 # Panel code
 # ---------------------------------------------------------------
 
-if [[ "$MODE" == "local" ]]; then
-    info "Copying panel code from ${BASE_DIR}..."
+# Back up what an overwrite cannot recreate: the environment (APP_KEY, module
+# credentials) and the panel database. Everything else comes back from the repo.
+backup_existing_checkout() {
+    local stamp backup
+    [[ -d "$PANEL_DIR" ]] || return 0
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    backup="/root/panel-backups/overwrite-${stamp}"
+    mkdir -p "$backup"
+    if [[ -f "$PANEL_DIR/.env" ]]; then
+        cp -a "$PANEL_DIR/.env" "$backup/.env"
+    fi
+    if [[ -f "$PANEL_DIR/storage/panel.sqlite" ]]; then
+        cp -a "$PANEL_DIR/storage/panel.sqlite" "$backup/panel.sqlite"
+    fi
+    chmod 700 "$backup"
+    OVERWRITE_BACKUP_DIR="$backup"
+    warn "Backed up .env and panel database to ${backup} — restore them manually if you need the old data."
+}
+
+copy_local_code() {
     mkdir -p "$PANEL_DIR"
     rsync -a --delete \
         --exclude '.git' \
@@ -291,17 +365,58 @@ if [[ "$MODE" == "local" ]]; then
         --exclude 'storage/panel.sqlite' \
         --exclude 'database/*.sqlite*' \
         "$BASE_DIR/" "$PANEL_DIR/"
+}
+
+if [[ "$MODE" == "local" ]]; then
+    case "$CODE_ACTION" in
+        skip)
+            info "Keeping the existing panel code (--code=skip)."
+            ;;
+        overwrite)
+            backup_existing_checkout
+            if [[ "$BASE_DIR" == "$PANEL_DIR" ]]; then
+                warn "The installer runs from ${PANEL_DIR} itself — keeping the code instead of deleting it."
+            else
+                info "Overwriting ${PANEL_DIR} with the code from ${BASE_DIR}..."
+                rm -rf "$PANEL_DIR"
+                copy_local_code
+            fi
+            ;;
+        *)
+            info "Copying panel code from ${BASE_DIR}..."
+            copy_local_code
+            ;;
+    esac
 else
-    if [[ -d "$PANEL_DIR/.git" ]]; then
-        info "Updating existing checkout (branch ${BRANCH})..."
-        git -C "$PANEL_DIR" fetch --quiet origin
-        git -C "$PANEL_DIR" checkout --quiet "$BRANCH"
-        git -C "$PANEL_DIR" pull --quiet --ff-only origin "$BRANCH" || warn "Fast-forward pull failed; keeping current code."
-    else
-        info "Cloning ${REPO_URL} (branch ${BRANCH})..."
-        rm -rf "$PANEL_DIR"
-        git clone --quiet --branch "$BRANCH" "$REPO_URL" "$PANEL_DIR"
-    fi
+    case "$CODE_ACTION" in
+        skip)
+            info "Keeping the existing panel code (--code=skip)."
+            ;;
+        overwrite)
+            backup_existing_checkout
+            info "Cloning ${REPO_URL} (branch ${BRANCH}) into a clean ${PANEL_DIR}..."
+            rm -rf "$PANEL_DIR"
+            git clone --quiet --branch "$BRANCH" "$REPO_URL" "$PANEL_DIR"
+            ;;
+        *)
+            if [[ -d "$PANEL_DIR/.git" ]]; then
+                info "Updating existing checkout (branch ${BRANCH})..."
+                git -C "$PANEL_DIR" fetch --quiet origin
+                git -C "$PANEL_DIR" checkout --quiet "$BRANCH"
+                git -C "$PANEL_DIR" pull --quiet --ff-only origin "$BRANCH" || warn "Fast-forward pull failed; keeping current code."
+            else
+                info "Cloning ${REPO_URL} (branch ${BRANCH})..."
+                rm -rf "$PANEL_DIR"
+                git clone --quiet --branch "$BRANCH" "$REPO_URL" "$PANEL_DIR"
+            fi
+            ;;
+    esac
+fi
+
+# --code=skip (and a half-finished earlier run) may leave no application here;
+# fail early instead of dying on the first artisan call below.
+if [[ ! -f "$PANEL_DIR/artisan" ]]; then
+    fail "${PANEL_DIR} does not contain a panel application (artisan missing) — re-run with --code=overwrite."
 fi
 
 cd "$PANEL_DIR"
@@ -813,22 +928,23 @@ ok "Firewall allows SSH (${SSH_PORT}), 80, 443 and DNS (53)."
 # Summary
 # ---------------------------------------------------------------
 
+case "$CODE_ACTION" in
+    overwrite) CODE_SUMMARY="overwritten with a clean install" ;;
+    skip)      CODE_SUMMARY="left untouched (--code=skip)" ;;
+    *)         CODE_SUMMARY="kept and updated in place" ;;
+esac
+
 echo
 echo "============================================================"
 echo "                 PANEL INSTALLED"
 echo "============================================================"
 echo
-echo "  URL:      https://${PANEL_DOMAIN}"
-echo "  Login:    ${ADMIN_EMAIL}"
-if [[ "$GENERATED_PASSWORD" == "1" ]]; then
-    echo "  Password: ${ADMIN_PASSWORD}   (change it after first login)"
-else
-    echo "  Password: (the one you entered)"
-fi
-echo "  Saved:    ${SECRETS_FILE} (PANEL_ADMIN_EMAIL / PANEL_ADMIN_PASSWORD)"
-echo
 echo "  App dir:  ${PANEL_DIR}"
+echo "  Code:     ${CODE_SUMMARY}"
 echo "  Secrets:  ${SECRETS_FILE}"
+if [[ -n "$OVERWRITE_BACKUP_DIR" ]]; then
+    echo "  Backup:   ${OVERWRITE_BACKUP_DIR} (.env + panel database)"
+fi
 if [[ -n "${PDNS_SERVER_IP:-}" ]]; then
     echo "  Nameservers: ns1.${PDNS_NS_DOMAIN} / ns2.${PDNS_NS_DOMAIN} → ${PDNS_SERVER_IP}"
 fi
@@ -836,10 +952,22 @@ echo
 echo "  Next steps:"
 echo "  1. Point DNS: ${PANEL_DOMAIN} → this server's public IP"
 echo "     (Caddy issues the certificate automatically once DNS resolves)"
-echo "  2. Open https://${PANEL_DOMAIN} and sign in"
+echo "  2. Sign in with the credentials below"
 echo "  3. For the DNS module: register ns1.${PDNS_NS_DOMAIN} / ns2.${PDNS_NS_DOMAIN}"
 echo "     with your registrar, pointing both at ${PDNS_SERVER_IP:-unknown}"
 echo "  4. Install other modules (Sites, Email, phpMyAdmin) from the panel"
 echo
 echo "  Re-run this script any time to update the panel."
+echo
+echo "============================================================"
+echo "              PANEL IS LIVE — SAVE THESE"
+echo "============================================================"
+echo "  Login URL:  https://${PANEL_DOMAIN}/login"
+echo "  Panel URL:  https://${PANEL_DOMAIN}"
+echo "  Email:      ${ADMIN_EMAIL}"
+echo "  Password:   ${ADMIN_PASSWORD}"
+if [[ "$GENERATED_PASSWORD" == "1" ]]; then
+    echo "              (generated — change it after your first login)"
+fi
+echo "  Stored in:  ${SECRETS_FILE} (PANEL_ADMIN_EMAIL / PANEL_ADMIN_PASSWORD)"
 echo "============================================================"

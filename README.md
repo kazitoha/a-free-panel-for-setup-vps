@@ -35,8 +35,9 @@ curl -fsSL https://raw.githubusercontent.com/kazitoha/a-free-panel-for-setup-vps
       --non-interactive
 ```
 
-- `--password` দিলে সেটাই admin password হবে; না দিলে random generate হবে আর summary এ দেখাবে
+- `--password` দিলে সেটাই admin password হবে; না দিলে random generate হবে। ইনস্টল শেষ হওয়ার পর output এর সবার শেষে login URL আর email/password দেখানো হয়
 - piped mode এ prompt চালু থাকলেও নেই (`curl | bash` এ stdin = script, তাই installer নিজেই non-interactive ধরে নেয়)
+- আগে থেকেই `/var/www/panel` এ panel থাকলে installer জিজ্ঞেস করে কী করবে — **update** (ডিফল্ট: থকেই রেখে fast-forward), **overwrite** (পুরো project মুছে নতুন করে ইনস্টল; আগে `.env` আর database `/root/panel-backups/overwrite-<time>` এ backup নেয়), **skip** (code যেমন আছে তেমনই রাখবে)। শেষ দুটোর জন্য piped mode এ `--code=overwrite` / `--code=skip` দিতে হবে
 - Admin credential পরেও পাওয়া যায়: `/root/.panel-secrets` এ `PANEL_ADMIN_EMAIL` / `PANEL_ADMIN_PASSWORD` লেখা থাকে (chmod 600)
 
 বিকল্প: script download করে চালাতে চাইলে (interactive wizard):
@@ -47,9 +48,9 @@ curl -o /tmp/install-panel.sh https://raw.githubusercontent.com/kazitoha/a-free-
 sudo bash /tmp/install-panel.sh
 ```
 
-Wizard ৩টা জিনিস চাবে: panel domain, admin email, admin password (blank = auto generate)।
+Wizard ৩টা জিনিস চাবে: panel domain, admin email, admin password (blank = auto generate)। panel আগে থেকেই থাকলে ৪র্থ প্রশ্ন আসে: update / overwrite / skip।
 
-Installer যা সেটআপ করে: PHP-FPM + extensions · MySQL · Composer · Caddy · PowerDNS (HTTP API + zone seed) · Node/assets · panel code (clone) · migrations · admin account · HTTPS site · sudo runner · UFW। আবার চালালে safe (idempotent) — code update হয়।
+Installer যা সেটআপ করে: PHP-FPM + extensions · MySQL · Composer · Caddy · PowerDNS (HTTP API + zone seed) · Node/assets · panel code (clone) · migrations · admin account · HTTPS site · sudo runner · UFW। আবার চালালে safe (idempotent) — আগে থেকেই আছে কিনা জিজ্ঞেস করে, ডিফল্টে code update হয়।
 
 ```bash
 # সব option দিয়ে local file থেকেও চালানো যায়
