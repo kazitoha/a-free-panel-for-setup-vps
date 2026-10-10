@@ -974,7 +974,11 @@ fi
 # ---------------------------------------------------------------
 
 info "Installing privileged runner..."
-install -m 755 -o root -g root "$PANEL_DIR/scripts/run.sh" /usr/local/panel/run
+install -d -m 755 -o root -g root /usr/local/panel
+
+if ! install -m 755 -o root -g root "$PANEL_DIR/scripts/run.sh" /usr/local/panel/run; then
+    fail "Could not install /usr/local/panel/run."
+fi
 
 if visudo -cf "$PANEL_DIR/scripts/panel.sudoers" >/dev/null 2>&1; then
     install -m 440 -o root -g root "$PANEL_DIR/scripts/panel.sudoers" /etc/sudoers.d/panel
@@ -1006,7 +1010,8 @@ ufw allow 53/tcp  comment 'DNS'   >/dev/null 2>&1 || true
 ufw allow 53/udp  comment 'DNS'   >/dev/null 2>&1 || true
 
 if ufw status | grep -q 'Status: inactive'; then
-    ufw --force enable >/dev/null
+    ufw --force enable >/dev/null \
+        || warn "UFW could not be enabled — open 80/443 yourself if the panel is unreachable."
 fi
 ok "Firewall allows SSH (${SSH_PORT}), 80, 443 and DNS (53)."
 
