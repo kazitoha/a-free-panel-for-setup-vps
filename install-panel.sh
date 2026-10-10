@@ -60,6 +60,12 @@ USAGE
 }
 
 for argument in "$@"; do
+    # Copy-paste from docs or chat often collapses "\" line breaks into plain
+    # spaces, which turn into whitespace-only arguments — ignore those instead
+    # of failing on an option nobody typed.
+    if [[ "$argument" =~ ^[[:space:]]*$ ]]; then
+        continue
+    fi
     case "$argument" in
         --domain=*)       PANEL_DOMAIN="${argument#*=}" ;;
         --email=*)        ADMIN_EMAIL="${argument#*=}" ;;
@@ -72,7 +78,7 @@ for argument in "$@"; do
         --local)          MODE="local" ;;
         --non-interactive) NON_INTERACTIVE=1 ;;
         -h|--help)        usage; exit 0 ;;
-        *)                usage >&2; fail "Unknown option: $argument" ;;
+        *)                usage >&2; fail "Unknown option: $(printf '%q' "$argument")" ;;
     esac
 done
 
