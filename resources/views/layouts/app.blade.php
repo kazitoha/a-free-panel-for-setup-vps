@@ -35,6 +35,10 @@
                class="nav-link {{ request()->routeIs('caddy.*') ? 'nav-link-active' : '' }}">
                 <span aria-hidden="true">◈</span> Sites
             </a>
+            <a href="{{ route('php.index') }}"
+               class="nav-link {{ request()->routeIs('php.*') ? 'nav-link-active' : '' }}">
+                <span aria-hidden="true">&lt;?</span> PHP versions
+            </a>
             <a href="{{ route('pma.index') }}"
                class="nav-link {{ request()->routeIs('pma.*') ? 'nav-link-active' : '' }}">
                 <span aria-hidden="true">▦</span> phpMyAdmin

@@ -11,6 +11,7 @@ A self-hosted control panel for Ubuntu VPS servers. Manage Caddy sites, phpMyAdm
 | **Dashboard** | Service status (LED strip), CPU load, RAM, disk, public IP, listening ports, service restart, job health checks |
 | **Sites (Caddy)** | Add/edit/remove sites, PHP version, wildcard SSL, on-demand TLS, validate + auto-rollback |
 | **phpMyAdmin** | One-click install + `pma.<panel-domain>` subdomain |
+| **PHP versions** | Installed versions দেখায়, আর 8.x এক ক্লিকে install/remove (ondrej PPA) — Sites আর Projects-এ সেগুলোই বেছে নেওয়া যায় |
 | **DNS (PowerDNS)** | Zone + record CRUD via the PowerDNS HTTP API, protected NS/panel zones, batch customer-domain import, service restart |
 | **Email (Stalwart)** | Install wizard, mail domain + mailbox create/reset/delete, MX/SPF/DMARC/DKIM auto-records |
 | **Databases** | MySQL database/user create, drop, grant, password reset |

@@ -215,7 +215,7 @@ class SystemService
     public function phpVersions(): array
     {
         $versions = [];
-        $base = '/etc/php';
+        $base = (string) config('panel.php_dir', '/etc/php');
 
         if (is_dir($base)) {
             foreach (scandir($base) ?: [] as $entry) {

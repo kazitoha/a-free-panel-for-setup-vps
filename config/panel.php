@@ -28,6 +28,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | PHP version directory
+    |--------------------------------------------------------------------------
+    |
+    | Where each installed PHP version lives (phpX.Y subdirectories). Sites,
+    | Projects and the PHP module page all read the versions from here.
+    |
+    */
+
+    'php_dir' => env('PANEL_PHP_DIR', '/etc/php'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Caddy paths
     |--------------------------------------------------------------------------
     */

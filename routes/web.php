@@ -12,6 +12,7 @@ use App\Http\Controllers\InstallController;
 use App\Http\Controllers\LogsController;
 use App\Http\Controllers\MailboxController;
 use App\Http\Controllers\MailController;
+use App\Http\Controllers\PhpController;
 use App\Http\Controllers\PmaController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ServiceController;
@@ -188,6 +189,14 @@ Route::middleware('auth')->group(function () {
     Route::delete('/phpmyadmin', [PmaController::class, 'uninstall'])
         ->middleware('throttle:5,1')
         ->name('pma.uninstall');
+
+    Route::get('/php', [PhpController::class, 'index'])->name('php.index');
+    Route::post('/php/install', [PhpController::class, 'install'])
+        ->middleware('throttle:5,1')
+        ->name('php.install');
+    Route::delete('/php', [PhpController::class, 'remove'])
+        ->middleware('throttle:5,1')
+        ->name('php.remove');
 
     Route::get('/installs/{install}', [InstallController::class, 'show'])
         ->name('installs.show');

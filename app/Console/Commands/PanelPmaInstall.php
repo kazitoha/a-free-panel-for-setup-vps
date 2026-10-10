@@ -20,7 +20,7 @@ use Throwable;
  * (captured into the install log) and updates the installs row so the web UI
  * can poll progress.
  */
-#[Signature('panel:pma:install {id : Install record id} {--version= : phpMyAdmin release (default from config)}')]
+#[Signature('panel:pma:install {id : Install record id} {--release= : phpMyAdmin release (default from config)}')]
 #[Description('Download, install and serve phpMyAdmin behind Caddy')]
 class PanelPmaInstall extends Command
 {
@@ -53,7 +53,7 @@ class PanelPmaInstall extends Command
             'message' => null,
         ])->save();
 
-        $version = (string) ($this->option('version') ?: config('panel.phpmyadmin.version'));
+        $version = (string) ($this->option('release') ?: config('panel.phpmyadmin.version'));
 
         try {
             $this->runSteps($install, $version);

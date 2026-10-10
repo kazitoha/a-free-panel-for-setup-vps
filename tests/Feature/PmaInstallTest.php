@@ -114,4 +114,16 @@ class PmaInstallTest extends TestCase
             ->delete(route('pma.uninstall'))
             ->assertSessionHas('error', SudoRunner::denialMessage());
     }
+
+    /**
+     * A `--version` option collides with Symfony's global version flag and
+     * makes the whole command fail to register — the install button would
+     * then spawn a command that cannot even start.
+     */
+    public function test_the_installer_command_is_registered(): void
+    {
+        $this->artisan('panel:pma:install', ['id' => 999999])
+            ->expectsOutputToContain('Install record not found.')
+            ->assertFailed();
+    }
 }
