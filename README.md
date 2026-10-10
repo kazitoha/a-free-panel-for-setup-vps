@@ -22,7 +22,7 @@ A self-hosted control panel for Ubuntu VPS servers. Manage Caddy sites, phpMyAdm
 
 ## কিভাবে চালাবেন / How to run — নতুন Ubuntu VPS এ (22.04 / 24.04)
 
-আগে DNS এ A record বসান: `panel.example.com → VPS_IP`। তারপর VPS এ ssh করে একটাই command — panel download, full setup আর admin login credential একসাথে set হয়ে যাবে:
+আগে DNS এ A record বসান: `panel.example.com → VPS_IP`। না বসালেও চলবে — installer আরও দুটো address লেখে: `https://panel.<VPS_IP>.nip.io` (সত্যিকারের certificate, কোনো DNS setup ছাড়াই চলে) আর `http://<VPS_IP>` (শুধু শুরুর setup-এর জন্য)। A record বসানোর সাথে সাথেই main domain টা HTTPS দিয়ে চলবে, সেটাই চূড়ান্ত URL। তারপর VPS এ ssh করে একটাই command — panel download, full setup আর admin login credential একসাথে set হয়ে যাবে:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kazitoha/a-free-panel-for-setup-vps/main/install-panel.sh \

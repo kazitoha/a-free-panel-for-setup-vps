@@ -927,10 +927,38 @@ ${PANEL_DOMAIN} {
     file_server
 }
 EOF
+
+# Reachable before DNS for PANEL_DOMAIN resolves: a nip.io hostname that
+# always points at this IP (Caddy gets a real certificate for it), plus the
+# bare IP over plain HTTP for initial setup. PANEL_DOMAIN stays the main site.
+if [[ -n "$PDNS_SERVER_IP" ]]; then
+    cat >> "/etc/caddy/sites/panel.caddy" <<EOF
+
+panel.${PDNS_SERVER_IP}.nip.io {
+    root * ${PANEL_DIR}/public
+    encode zstd gzip
+    php_fastcgi unix//run/php/php${PHP_VERSION}-fpm.sock
+    file_server
+}
+
+http://${PDNS_SERVER_IP} {
+    root * ${PANEL_DIR}/public
+    encode zstd gzip
+    php_fastcgi unix//run/php/php${PHP_VERSION}-fpm.sock
+    file_server
+}
+EOF
+    ok "Panel also served at https://panel.${PDNS_SERVER_IP}.nip.io and http://${PDNS_SERVER_IP}."
+else
+    warn "Server IP unknown — only ${PANEL_DOMAIN} was configured in Caddy."
+fi
+
 chmod 644 "/etc/caddy/sites/panel.caddy"
 
 if [[ ! -f /etc/caddy/Caddyfile ]]; then
-    printf '{}\n\nimport /etc/caddy/sites/*.caddy\n' > /etc/caddy/Caddyfile
+    # "{}" would be parsed as a site address and break validation — an
+    # import-only file is what a fresh Caddy actually accepts.
+    printf 'import /etc/caddy/sites/*.caddy\n' > /etc/caddy/Caddyfile
 elif ! grep -Fq 'import /etc/caddy/sites/*.caddy' /etc/caddy/Caddyfile; then
     printf '\nimport /etc/caddy/sites/*.caddy\n' >> /etc/caddy/Caddyfile
 fi
@@ -1008,12 +1036,19 @@ if [[ -n "${PDNS_SERVER_IP:-}" ]]; then
 fi
 echo
 echo "  Next steps:"
-echo "  1. Point DNS: ${PANEL_DOMAIN} → this server's public IP"
+echo "  1. Open the panel right now — these work before DNS points here:"
+if [[ -n "${PDNS_SERVER_IP:-}" ]]; then
+    echo "       https://panel.${PDNS_SERVER_IP}.nip.io  (trusted certificate)"
+    echo "       http://${PDNS_SERVER_IP}                (plain HTTP — setup only)"
+else
+    echo "       (server IP unknown — point DNS first)"
+fi
+echo "  2. Point DNS: ${PANEL_DOMAIN} → this server's public IP"
 echo "     (Caddy issues the certificate automatically once DNS resolves)"
-echo "  2. Sign in with the credentials below"
-echo "  3. For the DNS module: register ns1.${PDNS_NS_DOMAIN} / ns2.${PDNS_NS_DOMAIN}"
+echo "  3. Sign in with the credentials below"
+echo "  4. For the DNS module: register ns1.${PDNS_NS_DOMAIN} / ns2.${PDNS_NS_DOMAIN}"
 echo "     with your registrar, pointing both at ${PDNS_SERVER_IP:-unknown}"
-echo "  4. Install other modules (Sites, Email, phpMyAdmin) from the panel"
+echo "  5. Install other modules (Sites, Email, phpMyAdmin) from the panel"
 echo
 echo "  Re-run this script any time to update the panel."
 echo

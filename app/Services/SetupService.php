@@ -22,6 +22,7 @@ class SetupService
      * @return array{
      *     domain: string,
      *     url: string,
+     *     alt_urls: list<array{url: string, note: string}>,
      *     php: array{installed: string, running: string},
      *     admin: string|null,
      *     database: array{engine: string, user: string, password: string},
@@ -68,6 +69,7 @@ class SetupService
         return [
             'domain' => $domain,
             'url' => rtrim((string) config('app.url'), '/'),
+            'alt_urls' => $this->alternativeUrls($serverIp),
             'php' => ['installed' => $installed, 'running' => $running],
             'admin' => User::orderBy('id')->value('email'),
             'database' => [
@@ -132,6 +134,40 @@ class SetupService
         }
 
         return $records;
+    }
+
+    /**
+     * Addresses that answer while DNS for the panel domain still points
+     * elsewhere — only those the written Caddy site file actually contains.
+     *
+     * @return list<array{url: string, note: string}>
+     */
+    private function alternativeUrls(string $serverIp): array
+    {
+        $site = (string) config('panel.caddy_sites_dir').'/panel.caddy';
+
+        if ($serverIp === '' || ! is_file($site)) {
+            return [];
+        }
+
+        $snippet = (string) file_get_contents($site);
+        $urls = [];
+
+        if (str_contains($snippet, 'nip.io')) {
+            $urls[] = [
+                'url' => 'https://panel.'.$serverIp.'.nip.io',
+                'note' => 'Real certificate — works before the domain points here.',
+            ];
+        }
+
+        if (str_contains($snippet, 'http://'.$serverIp)) {
+            $urls[] = [
+                'url' => 'http://'.$serverIp,
+                'note' => 'Plain HTTP — finish setup here, then switch to HTTPS.',
+            ];
+        }
+
+        return $urls;
     }
 
     /**

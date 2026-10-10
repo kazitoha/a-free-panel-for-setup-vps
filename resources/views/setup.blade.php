@@ -39,6 +39,20 @@
                            class="text-amber-400 hover:underline">{{ $setup['url'] }} ↗</a>
                     </dd>
                 </div>
+                @if ($setup['alt_urls'] !== [])
+                    <div class="flex justify-between gap-4">
+                        <dt class="shrink-0 text-slate-500">Opens without DNS</dt>
+                        <dd class="space-y-2 text-right">
+                            @foreach ($setup['alt_urls'] as $alt)
+                                <div>
+                                    <a href="{{ $alt['url'] }}" target="_blank" rel="noopener"
+                                       class="font-mono text-slate-300 hover:text-amber-400 hover:underline">{{ $alt['url'] }} ↗</a>
+                                    <p class="mt-0.5 text-xs text-slate-500">{{ $alt['note'] }}</p>
+                                </div>
+                            @endforeach
+                        </dd>
+                    </div>
+                @endif
                 <div class="flex justify-between gap-4">
                     <dt class="text-slate-500">PHP running</dt>
                     <dd class="font-mono text-slate-300">{{ $setup['php']['running'] }}</dd>
