@@ -44,7 +44,7 @@ Usage: sudo bash install-panel.sh [options]
 Options:
   --domain=HOST      Panel hostname (e.g. panel.example.com)
   --email=EMAIL      Administrator email
-  --password=PASS    Administrator password (generated when omitted)
+  --password=PASS    Administrator password (min 8 characters; generated when omitted)
   --repo=URL         Git repository to install from
   --branch=NAME      Git branch (default: main)
   --code=ACTION      When a panel already exists: update (default) — keep it and
@@ -176,7 +176,11 @@ if [[ -z "$ADMIN_EMAIL" ]]; then
 fi
 
 if [[ -z "$ADMIN_PASSWORD" && "$NON_INTERACTIVE" != "1" ]]; then
-    prompt_secret ADMIN_PASSWORD "Administrator password (blank = generate)"
+    while :; do
+        prompt_secret ADMIN_PASSWORD "Administrator password (blank = generate)"
+        [[ -z "$ADMIN_PASSWORD" || ${#ADMIN_PASSWORD} -ge 8 ]] && break
+        echo "  Password must be at least 8 characters."
+    done
 fi
 
 if [[ -z "$ADMIN_PASSWORD" ]]; then
@@ -185,6 +189,15 @@ if [[ -z "$ADMIN_PASSWORD" ]]; then
 else
     GENERATED_PASSWORD=0
 fi
+
+# Credential rules enforced later by `panel:admin:create` — check them here,
+# before any package is installed, instead of failing after ten minutes.
+[[ "$ADMIN_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] \
+    || fail "Invalid --email value: ${ADMIN_EMAIL}"
+if [[ "$GENERATED_PASSWORD" -eq 0 && ${#ADMIN_PASSWORD} -lt 8 ]]; then
+    fail "--password must be at least 8 characters (got ${#ADMIN_PASSWORD}) — pick a longer one and re-run."
+fi
+# --- end credential checks ---------------------------------------------------
 
 # Resolve the panel source: local checkout or git repository.
 if [[ -z "$MODE" ]]; then
