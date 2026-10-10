@@ -25,6 +25,10 @@
                class="nav-link {{ request()->routeIs('dashboard') ? 'nav-link-active' : '' }}">
                 <span aria-hidden="true">▤</span> Dashboard
             </a>
+            <a href="{{ route('setup.index') }}"
+               class="nav-link {{ request()->routeIs('setup.*') ? 'nav-link-active' : '' }}">
+                <span aria-hidden="true">☑</span> Setup
+            </a>
 
             <p class="eyebrow px-3 pb-2 pt-5">manage</p>
             <a href="{{ route('caddy.index') }}"

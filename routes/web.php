@@ -15,6 +15,7 @@ use App\Http\Controllers\MailController;
 use App\Http\Controllers\PmaController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ServiceController;
+use App\Http\Controllers\SetupController;
 use App\Http\Controllers\UpdateController;
 use Illuminate\Support\Facades\Route;
 
@@ -33,6 +34,7 @@ Route::middleware('guest')->group(function () {
 
 Route::middleware('auth')->group(function () {
     Route::get('/', DashboardController::class)->name('dashboard');
+    Route::get('/setup', SetupController::class)->name('setup.index');
     Route::post('/services/restart', [ServiceController::class, 'restart'])
         ->middleware('throttle:10,1')
         ->name('services.restart');

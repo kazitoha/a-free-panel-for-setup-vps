@@ -37,6 +37,18 @@
         </div>
     </header>
 
+    @if ($setup['required_pending'] > 0)
+        <a href="{{ route('setup.index') }}"
+           class="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-900/60 bg-amber-950/30 px-4 py-3 hover:border-amber-700">
+            <span class="text-sm text-amber-200">
+                <strong class="font-semibold">Setup incomplete</strong>
+                — {{ $setup['required_pending'] }} required item(s) still pending: DNS records,
+                database credentials and what is left to install.
+            </span>
+            <span class="font-mono text-xs text-amber-400">open setup →</span>
+        </a>
+    @endif
+
     {{-- Service status bus --}}
     <section class="card mb-6 p-5" aria-label="Service status">
         <div class="mb-4 flex items-center justify-between gap-4">
