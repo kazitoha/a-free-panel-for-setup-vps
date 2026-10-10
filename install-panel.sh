@@ -497,6 +497,8 @@ fi
 
 PDNS_NS_DOMAIN="${PDNS_NS_DOMAIN:-${PANEL_DOMAIN}}"
 PDNS_API_URL="http://127.0.0.1:8081"
+# Zones are created on the collection endpoint; only reads/deletes take /zones/{id}.
+PDNS_ZONES_URL="${PDNS_API_URL}/api/v1/servers/localhost/zones"
 
 if [[ -z "${PDNS_SERVER_IP:-}" ]]; then
     PDNS_SERVER_IP="$(curl -fsS --max-time 5 -4 https://api.ipify.org 2>/dev/null || true)"
@@ -670,8 +672,8 @@ fi
 
 seed_pdns_zone() {
     local zone="$1"
-    local zone_url="${PDNS_API_URL}/api/v1/servers/localhost/zones/${zone}."
-    local serial ns1 ns2 payload code
+    local zone_url="${PDNS_ZONES_URL}/${zone}."
+    local serial ns1 ns2 payload code detail
 
     if curl -fsS --max-time 3 -H "X-API-Key: ${PDNS_API_KEY}" "$zone_url" >/dev/null 2>&1; then
         ok "DNS zone ${zone} already exists."
@@ -713,13 +715,15 @@ seed_pdns_zone() {
 
     code="$(curl -sS --max-time 5 -o /tmp/pdns-seed.json -w '%{http_code}' \
         -H "X-API-Key: ${PDNS_API_KEY}" -H 'Content-Type: application/json' \
-        -d "$payload" "$zone_url" || true)"
+        -d "$payload" "$PDNS_ZONES_URL" || true)"
     code="${code:-000}"
 
     if [[ "$code" =~ ^(200|201|204)$ ]]; then
         ok "Seeded DNS zone ${zone}."
     else
-        warn "Could not seed zone ${zone} (HTTP ${code}): $(jq -r '.errors[0].message // .error // .message // empty' /tmp/pdns-seed.json 2>/dev/null || true)"
+        detail="$(jq -r '.errors[0].message // .error // .message // empty' /tmp/pdns-seed.json 2>/dev/null || true)"
+        [[ -n "$detail" ]] || detail="$(head -c 200 /tmp/pdns-seed.json 2>/dev/null || true)"
+        warn "Could not seed zone ${zone} (HTTP ${code})${detail:+: ${detail}}"
     fi
 }
 
@@ -735,7 +739,9 @@ fi
 # ---------------------------------------------------------------
 
 info "Installing PHP dependencies..."
-composer install --quiet --no-dev --optimize-autoloader --no-interaction --working-dir="$PANEL_DIR"
+if ! composer install --no-dev --optimize-autoloader --no-interaction --working-dir="$PANEL_DIR"; then
+    fail "composer install failed in ${PANEL_DIR} — see the output above; if the lock file is out of sync, run 'composer update' there and re-run this installer."
+fi
 
 info "Writing .env..."
 EXISTING_KEY=""
