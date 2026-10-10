@@ -490,7 +490,7 @@ if MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket -uroot -e "SELECT 1;
     ok "MySQL root password already configured."
 else
     info "Setting MySQL root password..."
-    mysql --protocol=socket -uroot <<SQL
+    mysql --protocol=socket -uroot <<SQL || fail "Could not set the MySQL root password."
 ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '${MYSQL_ROOT_PASSWORD}';
 FLUSH PRIVILEGES;
 SQL
@@ -529,7 +529,7 @@ info "Installing PowerDNS authoritative server..."
 apt-get install -y -qq pdns-server pdns-backend-mysql
 
 info "Configuring PowerDNS database..."
-MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket -uroot <<SQL
+MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket -uroot <<SQL || fail "Could not configure the PowerDNS database."
 CREATE DATABASE IF NOT EXISTS pdns;
 CREATE USER IF NOT EXISTS 'pdns_user'@'localhost' IDENTIFIED BY '${PDNS_DB_PASSWORD}';
 ALTER USER 'pdns_user'@'localhost' IDENTIFIED BY '${PDNS_DB_PASSWORD}';
@@ -537,7 +537,7 @@ GRANT ALL PRIVILEGES ON pdns.* TO 'pdns_user'@'localhost';
 FLUSH PRIVILEGES;
 SQL
 
-MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket -uroot pdns <<'SQL'
+MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket -uroot pdns <<'SQL' || fail "Could not create the PowerDNS schema (see the SQL error above)."
 CREATE TABLE IF NOT EXISTS domains (
   id                    INT AUTO_INCREMENT,
   name                  VARCHAR(255) NOT NULL,
@@ -658,7 +658,7 @@ fi
 
 info "Starting PowerDNS..."
 systemctl enable pdns >/dev/null 2>&1 || true
-systemctl restart pdns
+systemctl restart pdns || warn "PowerDNS did not restart cleanly — check 'systemctl status pdns'."
 
 PDNS_UP=0
 for _ in $(seq 1 30); do
@@ -709,7 +709,7 @@ seed_pdns_zone() {
                     {name: $zone, type: "SOA", ttl: 86400, records: [{content: $soa, disabled: false}]},
                     {name: $zone, type: "NS", ttl: 86400, records: [{content: $ns1, disabled: false}, {content: $ns2, disabled: false}]},
                     {name: $zone, type: "A", ttl: 3600, records: [{content: $ip, disabled: false}]},
-                    {name: ("*" + $zone), type: "A", ttl: 3600, records: [{content: $ip, disabled: false}]}
+                    {name: ("*." + $zone), type: "A", ttl: 3600, records: [{content: $ip, disabled: false}]}
                 ] + (if $glue then
                     [
                         {name: $ns1, type: "A", ttl: 3600, records: [{content: $ip, disabled: false}]},
@@ -828,7 +828,9 @@ if [[ ! -f "$PANEL_DIR/storage/panel.sqlite" ]]; then
 fi
 
 info "Running migrations..."
-php artisan migrate --force --no-interaction
+if ! php artisan migrate --force --no-interaction; then
+    fail "Database migration failed — check the output above (database: ${PANEL_DIR}/storage/panel.sqlite)."
+fi
 php artisan storage:link --no-interaction >/dev/null 2>&1 || true
 
 # Backup storage for panel:backup:* plus the scheduler tick in
@@ -845,10 +847,12 @@ if ! php artisan panel:update:check --no-interaction; then
 fi
 
 info "Creating administrator ${ADMIN_EMAIL}..."
-php artisan panel:admin:create "$ADMIN_EMAIL" \
+if ! php artisan panel:admin:create "$ADMIN_EMAIL" \
     --password="$ADMIN_PASSWORD" \
     --name="Admin" \
-    --no-interaction
+    --no-interaction; then
+    fail "Could not create the administrator account — see the output above."
+fi
 
 # Store the panel login next to the other secrets so a re-run (or a lost
 # terminal scrollback) can always recover it.
@@ -878,8 +882,9 @@ ok "Administrator saved to ${SECRETS_FILE}."
 
 if [[ ! -f "$PANEL_DIR/public/build/manifest.json" ]]; then
     info "Building frontend assets..."
-    npm install --silent --ignore-scripts
-    npm run build --silent
+    if ! npm install --ignore-scripts || ! npm run build; then
+        fail "Frontend build failed — check the npm/vite output above, then re-run this installer."
+    fi
 else
     ok "Frontend assets already built."
 fi
@@ -946,7 +951,8 @@ systemctl enable --now "php${PHP_VERSION}-fpm" >/dev/null 2>&1 || true
 systemctl enable --now mysql >/dev/null 2>&1 || true
 systemctl enable --now caddy >/dev/null 2>&1 || true
 systemctl enable --now pdns >/dev/null 2>&1 || true
-systemctl restart "php${PHP_VERSION}-fpm" caddy
+systemctl restart "php${PHP_VERSION}-fpm" caddy \
+    || warn "php${PHP_VERSION}-fpm / caddy did not restart cleanly — check their systemctl status."
 
 # Open the panel in UFW without locking the administrator out.
 SSH_PORT="$(ss -lntpH 2>/dev/null | awk '/:22 |:22$/ {print $4}' | head -1 | sed 's/.*://' || true)"
