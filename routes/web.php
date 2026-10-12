@@ -33,7 +33,7 @@ Route::middleware('guest')->group(function () {
         ->name('auth.google.callback');
 });
 
-Route::middleware('auth')->group(function () {
+Route::middleware(['auth', 'admin'])->group(function () {
     Route::get('/', DashboardController::class)->name('dashboard');
     Route::get('/setup', SetupController::class)->name('setup.index');
     Route::post('/services/restart', [ServiceController::class, 'restart'])

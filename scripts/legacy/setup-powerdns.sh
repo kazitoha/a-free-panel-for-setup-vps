@@ -1,13 +1,19 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib.sh
+source "$SCRIPT_DIR/../lib.sh"
+panel_init "${BASH_SOURCE[0]}"
+require_tty
+
 # Function: Skip or Overwrite Check
 ask_skip_or_overwrite() {
-    local item_name="$1"
+    local item_name="$1" choice=""
     echo -e "\n\e[33m[CHECK]\e[0m '$item_name' is already installed or configured."
-    read -p "Do you want to (s)kip or (o)verwrite/reinstall? [s/o]: " choice
-    case "$choice" in 
+    ask choice "Do you want to (s)kip or (o)verwrite/reinstall? [s/o]" "s"
+    case "$choice" in
         o|O ) return 0 ;; # Overwrite / Reinstall
         * ) return 1 ;;   # Skip by default
     esac
@@ -16,21 +22,17 @@ ask_skip_or_overwrite() {
 echo "========================================================="
 echo "        POWERDNS + MYSQL BACKEND SETUP WIZARD            "
 echo "========================================================="
-read -sp "Enter MySQL Root Password: " MYSQL_ROOT_PASSWORD
-echo ""
-read -sp "Confirm MySQL Root Password: " MYSQL_ROOT_PASSWORD_CONFIRM
-echo ""
+ask_secret MYSQL_ROOT_PASSWORD "Enter MySQL Root Password"
+ask_secret MYSQL_ROOT_PASSWORD_CONFIRM "Confirm MySQL Root Password"
 echo "========================================================="
 
 if [ "$MYSQL_ROOT_PASSWORD" != "$MYSQL_ROOT_PASSWORD_CONFIRM" ]; then
-    echo -e "\e[31mError: Passwords do not match!\e[0m"
-    exit 1
+    fail "Passwords do not match!"
 fi
 
 # MySQL Connection Test
 if ! mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "STATUS;" &>/dev/null; then
-    echo -e "\e[31mError: Incorrect MySQL Root Password or MySQL service is not running!\e[0m"
-    exit 1
+    fail "Incorrect MySQL Root Password or MySQL service is not running!"
 fi
 
 # PowerDNS Pre-installation Check
@@ -51,12 +53,11 @@ SERVER_IP=$(curl -s -4 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}'
 if [ "$SKIP_CORE_INSTALL" = false ]; then
 
     echo -e "\n=== 1. Interactive Nameserver Configuration ==="
-    read -p "Do you want to configure a primary domain for VPS Nameservers (e.g. ns1/ns2)? [Y/n]: " SETUP_NS
-    SETUP_NS=${SETUP_NS:-Y}
+    ask SETUP_NS "Do you want to configure a primary domain for VPS Nameservers (e.g. ns1/ns2)? [Y/n]" "Y"
 
     if [[ "$SETUP_NS" =~ ^[yY]$ ]]; then
-        read -p "Enter your Primary Nameserver Domain (e.g. hptechbd.com): " NS_DOMAIN
-        read -p "Enter VPS Public IP for Nameserver [$SERVER_IP]: " CUSTOM_IP
+        ask NS_DOMAIN "Enter your Primary Nameserver Domain (e.g. hptechbd.com)"
+        ask CUSTOM_IP "Enter VPS Public IP for Nameserver" "$SERVER_IP"
         NS_IP=${CUSTOM_IP:-$SERVER_IP}
     fi
 
@@ -223,15 +224,12 @@ fi
 # INTERACTIVE CUSTOMER DOMAIN IMPORT (AT THE END)
 # =========================================================
 echo -e "\n========================================================="
-read -p "Do you want to add customer domain(s) right now? [y/N]: " ADD_CUSTOMER_DOMAINS
+ask ADD_CUSTOMER_DOMAINS "Do you want to add customer domain(s) right now? [y/N]" "n"
 
 if [[ "$ADD_CUSTOMER_DOMAINS" =~ ^[yY]$ ]]; then
-    read -p "Enter domain(s) separated by comma (e.g. domain1.com,domain2.com): " INPUT_DOMAINS
-    read -p "Enter Primary NS Domain used for these clients [hptechbd.com]: " TARGET_NS_DOMAIN
-    TARGET_NS_DOMAIN=${TARGET_NS_DOMAIN:-hptechbd.com}
-    
-    read -p "Enter Target IP for these domains [$SERVER_IP]: " TARGET_DOMAIN_IP
-    TARGET_DOMAIN_IP=${TARGET_DOMAIN_IP:-$SERVER_IP}
+    ask INPUT_DOMAINS "Enter domain(s) separated by comma (e.g. domain1.com,domain2.com)"
+    ask TARGET_NS_DOMAIN "Enter Primary NS Domain used for these clients" "hptechbd.com"
+    ask TARGET_DOMAIN_IP "Enter Target IP for these domains" "$SERVER_IP"
 
     # Split comma-separated string into array
     IFS=',' read -ra DOMAIN_ARRAY <<< "$INPUT_DOMAINS"

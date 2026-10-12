@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -euo pipefail
 
@@ -7,9 +7,16 @@ set -euo pipefail
 # Ubuntu 24.04
 # ============================================================
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib.sh
+source "$SCRIPT_DIR/../lib.sh"
+
 SCRIPT_NAME="$(basename "$0")"
 BACKUP_DIR="/root/stalwart-backups"
 INFO_FILE="/root/stalwart-install-info.txt"
+
+panel_init "${BASH_SOURCE[0]}"
+require_tty
 
 # ------------------------------------------------------------
 # Colors / Output Helpers
@@ -46,7 +53,7 @@ command_exists() {
 
 pause_screen() {
     echo
-    read -r -p "Press ENTER to continue..."
+    pause "Press ENTER to continue..."
 }
 
 # ------------------------------------------------------------
@@ -56,7 +63,7 @@ pause_screen() {
 if [[ "${EUID}" -ne 0 ]]; then
     print_error "This script must be run as root."
     echo "Run:"
-    echo "sudo ./$SCRIPT_NAME"
+    echo "sudo bash ${PANEL_SCRIPT_PATH:-$SCRIPT_NAME}"
     exit 1
 fi
 
@@ -126,8 +133,7 @@ echo "  Mail hostname: mail.example.com"
 echo "  Base domain:   example.com"
 echo
 
-read -r -p "Enter mail hostname [mail.example.com]: " MAIL_HOSTNAME
-MAIL_HOSTNAME="${MAIL_HOSTNAME:-mail.example.com}"
+ask MAIL_HOSTNAME "Enter mail hostname" "mail.example.com"
 
 # Remove trailing dot if entered
 MAIL_HOSTNAME="${MAIL_HOSTNAME%.}"
@@ -168,7 +174,7 @@ else
     print_warning "Could not automatically detect public IPv4."
 fi
 
-read -r -p "Enter VPS public IPv4 [${DETECTED_IP:-}]: " SERVER_IP
+ask SERVER_IP "Enter VPS public IPv4" "${DETECTED_IP:-}"
 SERVER_IP="${SERVER_IP:-$DETECTED_IP}"
 
 if [[ -z "$SERVER_IP" ]]; then
@@ -187,14 +193,12 @@ print_success "Using public IPv4: $SERVER_IP"
 
 print_step "PowerDNS configuration"
 
-read -r -p "PowerDNS database name [pdns]: " PDNS_DB
-PDNS_DB="${PDNS_DB:-pdns}"
+ask PDNS_DB "PowerDNS database name" "pdns"
 
-read -r -p "PowerDNS database user [root]: " PDNS_DB_USER
-PDNS_DB_USER="${PDNS_DB_USER:-root}"
+ask PDNS_DB_USER "PowerDNS database user" "root"
 
 echo
-read -r -s -p "MySQL password for PowerDNS user '$PDNS_DB_USER': " MYSQL_PASSWORD
+ask_secret MYSQL_PASSWORD "MySQL password for PowerDNS user '$PDNS_DB_USER'"
 echo
 
 # ------------------------------------------------------------
@@ -261,8 +265,7 @@ DOMAIN_ID="$(
 if [[ -z "$DOMAIN_ID" ]]; then
     print_warning "Zone '$BASE_DOMAIN' was not found in PowerDNS."
 
-    read -r -p "Create PowerDNS zone '$BASE_DOMAIN' now? [Y/n]: " CREATE_ZONE
-    CREATE_ZONE="${CREATE_ZONE:-Y}"
+    ask CREATE_ZONE "Create PowerDNS zone '$BASE_DOMAIN' now? [Y/n]" "Y"
 
     if [[ "$CREATE_ZONE" =~ ^[Yy]$ ]]; then
 

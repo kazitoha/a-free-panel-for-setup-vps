@@ -11,7 +11,7 @@
 #
 # Re-running is safe: installed pieces are reused or refreshed in place.
 
-set -euo pipefail
+set -Eeuo pipefail
 
 # ---------------------------------------------------------------
 # Defaults & helpers
@@ -36,6 +36,17 @@ info()  { echo -e "\033[1;34m[INFO]\033[0m $1"; }
 ok()    { echo -e "\033[1;32m[ OK ]\033[0m $1"; }
 warn()  { echo -e "\033[1;33m[WARN]\033[0m $1"; }
 fail()  { echo -e "\033[1;31m[FAIL]\033[0m $1" >&2; exit 1; }
+
+# `set -e` alone stops the installer without saying which command died —
+# name it, so the log above it finally makes sense.
+installer_error() {
+    local __status="$?" __line="$1" __cmd="$2"
+    echo -e "\n\033[1;31m[FAIL]\033[0m install-panel.sh: line ${__line} — command failed (exit ${__status})" >&2
+    echo -e "       ${__cmd}" >&2
+    echo -e "       Nothing after this line ran. Fix the error above and re-run the installer." >&2
+    exit "$__status"
+}
+trap 'installer_error "$LINENO" "$BASH_COMMAND"' ERR
 
 usage() {
     cat <<'USAGE'
@@ -99,10 +110,10 @@ prompt() {
     fi
 
     if [[ -n "$__default" ]]; then
-        read -r -p "$__question [$__default]: " __answer
+        read -r -p "$__question [$__default]: " __answer || __answer=""
         __answer="${__answer:-$__default}"
     else
-        read -r -p "$__question: " __answer
+        read -r -p "$__question: " __answer || __answer=""
     fi
 
     printf -v "$__var" '%s' "$__answer"
@@ -116,7 +127,7 @@ prompt_secret() {
         return 0
     fi
 
-    read -r -s -p "$__question: " __answer
+    read -r -s -p "$__question: " __answer || __answer=""
     echo
     printf -v "$__var" '%s' "$__answer"
 }

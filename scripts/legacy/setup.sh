@@ -1,31 +1,37 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 set -e
 
-# ফাংশন: অপশন চেক এবং ইউজারের সিদ্ধান্ত নেওয়ার জন্য
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib.sh
+source "$SCRIPT_DIR/../lib.sh"
+panel_init "${BASH_SOURCE[0]}"
+require_tty
+
+# ফাংশন: অপশন চেক এবং ইউজারের সিদ্ধান্ত নেওয়ার জন্য
 ask_skip_or_overwrite() {
-    local item_name="$1"
+    local item_name="$1" choice=""
     echo -e "\n\e[33m[CHECK]\e[0m '$item_name' is already installed or configured."
-    read -p "Do you want to (s)kip or (o)verwrite/reinstall? [s/o]: " choice
-    case "$choice" in 
+    ask choice "Do you want to (s)kip or (o)verwrite/reinstall? [s/o]" "s"
+    case "$choice" in
         o|O ) return 0 ;; # Overwrite / Reinstall
         * ) return 1 ;;   # Skip by default
     esac
 }
 
 echo "========================================================="
-read -sp "Enter MySQL Root Password: " MYSQL_ROOT_PASSWORD
-echo ""
-read -sp "Confirm MySQL Root Password: " MYSQL_ROOT_PASSWORD_CONFIRM
-echo ""
+ask_secret MYSQL_ROOT_PASSWORD "Enter MySQL Root Password"
+ask_secret MYSQL_ROOT_PASSWORD_CONFIRM "Confirm MySQL Root Password"
 echo "========================================================="
 
 if [ "$MYSQL_ROOT_PASSWORD" != "$MYSQL_ROOT_PASSWORD_CONFIRM" ]; then
-    echo "Error: Passwords do not match!"
-    exit 1
+    fail "Passwords do not match!"
 fi
 
 echo -e "\n=== System Update and Installing Essentials ==="
+
+# পুরোনো যেকোনো ভাঙা caddy repo বা list ফাইল সরিয়ে নেওয়া
+sudo rm -f /etc/apt/sources.list.d/caddy-*.list
+
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y software-properties-common curl wget zip unzip git ufw
 
@@ -54,7 +60,7 @@ for v in "${PHP_VERSIONS[@]}"; do
     sudo systemctl start php$v-fpm
 done
 
-# Caddy Check & Install
+# Caddy Check & Install via Direct .deb Package (Bypasses Cloudsmith 402 Error)
 if command -v caddy &> /dev/null; then
     if ask_skip_or_overwrite "Caddy Web Server"; then
         INSTALL_CADDY=true
@@ -66,14 +72,31 @@ else
 fi
 
 if [ "$INSTALL_CADDY" = true ]; then
-    echo -e "\n=== Installing/Reinstalling Caddy Web Server ==="
-    sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg --yes
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-    sudo apt update
-    sudo apt install --reinstall caddy -y
+    step "Installing/Reinstalling Caddy Web Server (Direct .deb)"
+
+    # পুরোনো ভাঙা রিপোজিটরি ফাইল থাকলে মুছে ফেলা
+    sudo rm -f /etc/apt/sources.list.d/caddy-*.list
+
+    # গিটহাব থেকে লেটেস্ট লিনাক্স এএমডি৬৪ ডিবি ফাইল ডাউনলোড করা।
+    # API rate-limit বা নেটওয়ার্ক সমস্যায় আগে wget -qi - চুপচাপ কিছু
+    # ডাউনলোড করত না, তারপর apt ব্যর্থ হয়ে স্ক্রিপ্ট নীরবে থেমে যেত।
+    CADDY_DEB_URL="$(curl -fsSL https://api.github.com/repos/caddyserver/caddy/releases/latest \
+        | grep 'browser_download_url.*linux_amd64.deb' \
+        | head -1 \
+        | cut -d '"' -f 4)"
+
+    if [[ -z "$CADDY_DEB_URL" ]]; then
+        fail "Could not find the latest Caddy .deb URL from the GitHub API.
+       (Rate limit or network problem — wait a minute and re-run.)"
+    fi
+
+    download "$CADDY_DEB_URL" "/tmp/caddy-linux-amd64.deb"
+    sudo apt install -y /tmp/caddy-linux-amd64.deb
+    rm -f /tmp/caddy-linux-amd64.deb
+
     sudo systemctl enable caddy
     sudo systemctl start caddy
+    ok "Caddy installed and running."
 fi
 
 # MySQL Check & Install
@@ -112,9 +135,12 @@ else
 fi
 
 if [ "$INSTALL_COMPOSER" = true ]; then
-    echo -e "\n=== Installing Composer ==="
-    curl -sS https://getcomposer.org/installer | php
+    step "Installing Composer"
+    download "https://getcomposer.org/installer" "/tmp/composer-setup.php"
+    php /tmp/composer-setup.php
     sudo mv composer.phar /usr/local/bin/composer
+    rm -f /tmp/composer-setup.php
+    ok "Composer installed."
 fi
 
 # Node.js Check & Install
@@ -150,40 +176,41 @@ else
 fi
 
 if [ "$INSTALL_PMA" = true ]; then
-    echo -e "\n=== Installing phpMyAdmin ==="
+    step "Installing phpMyAdmin"
     PMA_VER="5.2.1"
     cd /tmp
-    wget https://files.phpmyadmin.net/phpMyAdmin/${PMA_VER}/phpMyAdmin-${PMA_VER}-all-languages.tar.gz
-    tar -zxvf phpMyAdmin-${PMA_VER}-all-languages.tar.gz
+    download "https://files.phpmyadmin.net/phpMyAdmin/${PMA_VER}/phpMyAdmin-${PMA_VER}-all-languages.tar.gz" \
+        "/tmp/phpMyAdmin-${PMA_VER}-all-languages.tar.gz"
+    tar -zxf "phpMyAdmin-${PMA_VER}-all-languages.tar.gz"
     sudo rm -rf /var/www/phpmyadmin
-    sudo mv phpMyAdmin-${PMA_VER}-all-languages /var/www/phpmyadmin
-    sudo rm phpMyAdmin-${PMA_VER}-all-languages.tar.gz
+    sudo mv "phpMyAdmin-${PMA_VER}-all-languages" /var/www/phpmyadmin
+    sudo rm "phpMyAdmin-${PMA_VER}-all-languages.tar.gz"
     sudo mkdir -p /var/www/phpmyadmin/tmp
     sudo chown -R www-data:www-data /var/www/phpmyadmin
+    ok "phpMyAdmin installed at /var/www/phpmyadmin"
 fi
 
 # =========================================================
 # DYNAMIC CADDYFILE WIZARD & PROJECT CREATION
 # =========================================================
-
 echo -e "\n========================================================="
 echo " CADDYFILE CONFIGURATION WIZARD"
 echo "========================================================="
 
-read -p "Do you want to configure a SaaS project with On-Demand SSL/Custom Domains? [y/N]: " HAS_SAAS
+ask HAS_SAAS "Do you want to configure a SaaS project with On-Demand SSL/Custom Domains? [y/N]" "n"
 
 if [[ "$HAS_SAAS" =~ ^[yY]$ ]]; then
-    read -p "Enter SaaS Main Domain (e.g. mysaas.com): " SAAS_DOMAIN
-    read -p "Enter Domain Check Endpoint URL [http://localhost/api/caddy-check-domain]: " SAAS_ASK_URL
-    SAAS_ASK_URL=${SAAS_ASK_URL:-http://localhost/api/caddy-check-domain}
-    
+    ask SAAS_DOMAIN "Enter SaaS Main Domain (e.g. mysaas.com)"
+    ask SAAS_ASK_URL "Enter Domain Check Endpoint URL" "http://localhost/api/caddy-check-domain"
+
     echo "Select PHP Version for SaaS project ($SAAS_DOMAIN):"
     echo "1) 8.4"
     echo "2) 8.3"
     echo "3) 8.2"
     echo "4) 8.1"
     echo "5) 7.4"
-    read -p "Choose [1-5] (default 1): " PHP_CHOICE
+    ask PHP_CHOICE "Choose [1-5]" "1"
+
     case $PHP_CHOICE in
         2) SAAS_PHP="8.3" ;;
         3) SAAS_PHP="8.2" ;;
@@ -193,11 +220,19 @@ if [[ "$HAS_SAAS" =~ ^[yY]$ ]]; then
     esac
 
     # Caddyfile ডায়নামিক জেনারেট করা (Caddy v2.8+ সামঞ্জস্যপূর্ণ)
-    sudo bash -c "cat <<EOF > /etc/caddy/Caddyfile
+ cat <<EOF | sudo tee /etc/caddy/Caddyfile > /dev/null
 {
     on_demand_tls {
         ask ${SAAS_ASK_URL}
     }
+}
+
+# কমন স্নিপেট: সব সাইটের জন্য TLS অন-ডিমান্ড এবং কম্প্রেশন গ্লোবালি হ্যান্ডেল করবে
+(site_defaults) {
+    tls {
+        on_demand
+    }
+    encode zstd br gzip
 }
 
 :8080 {
@@ -208,6 +243,7 @@ if [[ "$HAS_SAAS" =~ ^[yY]$ ]]; then
 
 # SaaS Main Domain & Wildcard Subdomains
 ${SAAS_DOMAIN}, *.${SAAS_DOMAIN} {
+    import site_defaults
     root * /var/www/${SAAS_DOMAIN}/public
     php_fastcgi unix//run/php/php${SAAS_PHP}-fpm.sock
     file_server
@@ -215,134 +251,120 @@ ${SAAS_DOMAIN}, *.${SAAS_DOMAIN} {
 
 # On-Demand SSL for Custom Domains
 https:// {
-    tls {
-        on_demand
-    }
+    import site_defaults
     root * /var/www/${SAAS_DOMAIN}/public
     php_fastcgi unix//run/php/php${SAAS_PHP}-fpm.sock
     file_server
 }
-EOF"
-
-    # ১. ডোমেইন অনুযায়ী ফোল্ডার তৈরি (/var/www/DOMAIN/public)
+EOF
+    # ১. ডোমেইন অনুযায়ী ফোল্ডার তৈরি
     sudo mkdir -p /var/www/${SAAS_DOMAIN}/public
 
     # ২. সুন্দর ডিজাইনের index.html তৈরি করা
-    sudo bash -c "cat <<EOF > /var/www/${SAAS_DOMAIN}/public/index.html
+    cat <<'EOF' | sudo tee /var/www/${SAAS_DOMAIN}/public/index.html > /dev/null
 <!DOCTYPE html>
-<html lang=\"en\">
+<html lang="en">
 <head>
-    <meta charset=\"UTF-8\">
-    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-    <title>Welcome to ${SAAS_DOMAIN}</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        body {
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-            color: #ffffff;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .card {
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            padding: 40px;
-            text-align: center;
-            max-width: 500px;
-            width: 100%;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-        }
-        .status-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            background: rgba(34, 197, 94, 0.15);
-            color: #4ade80;
-            padding: 8px 16px;
-            border-radius: 50px;
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 24px;
-            border: 1px solid rgba(34, 197, 94, 0.3);
-        }
-        .pulse {
-            width: 10px;
-            height: 10px;
-            background-color: #22c55e;
-            border-radius: 50%;
-            box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
-            animation: pulse 1.6s infinite;
-        }
-        @keyframes pulse {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
-        }
-        h1 {
-            font-size: 32px;
-            font-weight: 700;
-            margin-bottom: 12px;
-            background: linear-gradient(to right, #38bdf8, #818cf8);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        p {
-            color: #94a3b8;
-            font-size: 16px;
-            line-height: 1.6;
-            margin-bottom: 24px;
-        }
-        .domain-tag {
-            background: #0f172a;
-            color: #e2e8f0;
-            padding: 10px 16px;
-            border-radius: 8px;
-            font-family: monospace;
-            font-size: 14px;
-            border: 1px solid #334155;
-            display: inline-block;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Welcome to SaaS System</title>
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+body {
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    color: #ffffff;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.card {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 40px;
+    text-align: center;
+    max-width: 500px;
+    width: 100%;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+    padding: 8px 16px;
+    border-radius: 50px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 24px;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+.pulse {
+    width: 10px;
+    height: 10px;
+    background-color: #22c55e;
+    border-radius: 50%;
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+    animation: pulse 1.6s infinite;
+}
+@keyframes pulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+h1 {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    background: linear-gradient(to right, #38bdf8, #818cf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+p {
+    color: #94a3b8;
+    font-size: 16px;
+    line-height: 1.6;
+    margin-bottom: 24px;
+}
+</style>
 </head>
 <body>
-    <div class=\"card\">
-        <div class=\"status-badge\">
-            <span class=\"pulse\"></span>
-            System Active
-        </div>
-        <h1>You are live now!</h1>
-        <p>Your Caddy server & PHP setup is successfully configured and ready for deployment.</p>
-        <div class=\"domain-tag\">${SAAS_DOMAIN}</div>
+<div class="card">
+    <div class="status-badge">
+        <span class="pulse"></span>
+        System Active
     </div>
+    <h1>You are live now!</h1>
+    <p>Your Caddy server & PHP setup is successfully configured and ready for deployment.</p>
+</div>
 </body>
 </html>
-EOF"
+EOF
 
-    # ৩. যথাযথ Ownership এবং Permissions দেওয়া
+    # ৩. Ownership দেওয়া
     sudo chown -R www-data:www-data /var/www/${SAAS_DOMAIN}
-
 else
     # সাধারণ ডিফল্ট Caddyfile
-    sudo bash -c 'cat <<EOF > /etc/caddy/Caddyfile
+    cat <<EOF | sudo tee /etc/caddy/Caddyfile > /dev/null
 :8080 {
     root * /var/www/phpmyadmin
     php_fastcgi unix//run/php/php8.2-fpm.sock
     file_server
 }
-EOF'
+EOF
 fi
 
 # Caddy Configuration Validate and Reload
+echo -e "\nTesting Caddy Configuration..."
 sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 
