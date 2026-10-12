@@ -70,6 +70,48 @@ Options:
 USAGE
 }
 
+# Copy-paste from docs, chat apps or Word replaces real spaces with
+# non-breaking (U+00A0) or zero-width (U+200B) spaces. The shell does not
+# treat those as separators, so a whole pasted command line arrives glued
+# together and dies as an "Unknown option:" that shows nothing on screen.
+# Split those back into real arguments; a value that already contains a
+# real space (--password='a b') is never touched.
+split_invisible_spaces() {
+    local __arg __v __part
+    local -a __parts
+
+    NORMALIZED_ARGS=()
+
+    for __arg in "$@"; do
+        __v="${__arg//$'\xc2\xa0'/ }"
+        __v="${__v//$'\xe2\x80\x8b'/ }"
+
+        if [[ "$__v" != "$__arg" && "$__arg" != *" "* ]]; then
+            __parts=()
+            read -r -a __parts <<< "$__v"
+
+            for __part in ${__parts[@]+"${__parts[@]}"}; do
+                if [[ -n "$__part" ]]; then
+                    NORMALIZED_ARGS+=("$__part")
+                fi
+            done
+        else
+            NORMALIZED_ARGS+=("$__arg")
+        fi
+    done
+}
+
+# Show invisible characters instead of printing them to a blank-looking slot.
+describe_argument() {
+    local __shown="$1"
+    __shown="${__shown//$'\xc2\xa0'/[NBSP]}"
+    __shown="${__shown//$'\xe2\x80\x8b'/[ZWSP]}"
+    printf '%q' "$__shown"
+}
+
+split_invisible_spaces "$@"
+set -- ${NORMALIZED_ARGS[@]+"${NORMALIZED_ARGS[@]}"}
+
 for argument in "$@"; do
     # Copy-paste from docs or chat often collapses "\" line breaks into plain
     # spaces, which turn into whitespace-only arguments — ignore those instead
@@ -89,7 +131,11 @@ for argument in "$@"; do
         --local)          MODE="local" ;;
         --non-interactive) NON_INTERACTIVE=1 ;;
         -h|--help)        usage; exit 0 ;;
-        *)                usage >&2; fail "Unknown option: $(printf '%q' "$argument")" ;;
+        *)                usage >&2
+                          fail "Unknown option: $(describe_argument "$argument")
+       If this came from a copy-pasted command, invisible spaces (shown as
+       [NBSP]/[ZWSP] above) or a broken line break are the usual cause —
+       retype the command instead of pasting it." ;;
     esac
 done
 

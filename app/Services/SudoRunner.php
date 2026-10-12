@@ -16,13 +16,18 @@ class SudoRunner
 
     /**
      * @param  list<string>  $panelArguments  e.g. ['panel:service:restart', 'caddy']
+     * @param  string|null  $input  Secret data (e.g. a password) written to the command's stdin
+     *                              so it never appears in the process table or command logs.
      * @return array{exit: int, stdout: string, stderr: string, denied: bool}
      */
-    public function run(array $panelArguments, float $timeout = 120.0): array
+    public function run(array $panelArguments, float $timeout = 120.0, ?string $input = null): array
     {
         $result = $this->command->run(
             ['sudo', '-n', self::WRAPPER, ...$panelArguments],
             $timeout,
+            null,
+            null,
+            $input,
         );
 
         $combined = $result['stderr'].$result['stdout'];

@@ -126,28 +126,16 @@
                     <dd class="font-mono text-slate-300">{{ $setup['database']['user'] }}</dd>
                 </div>
                 <div class="flex justify-between gap-4">
-                    <dt class="text-slate-500">Root password</dt>
-                    <dd class="flex items-center gap-2 font-mono text-slate-300">
-                        <span id="db-secret"
-                              data-value="{{ $setup['database']['password'] }}"
-                              data-shown="0">
-                            {{ $setup['database']['password'] !== '' ? '••••••••••' : '(not set)' }}
-                        </span>
-                        @if ($setup['database']['password'] !== '')
-                            <button type="button" onclick="toggleSecret()"
-                                    class="font-mono text-[11px] text-amber-400 hover:underline">show</button>
-                        @endif
-                    </dd>
-                </div>
-                <div class="flex justify-between gap-4">
                     <dt class="text-slate-500">phpMyAdmin login</dt>
-                    <dd class="font-mono text-slate-300">root / same password</dd>
+                    <dd class="font-mono text-slate-300">root + root password</dd>
                 </div>
             </dl>
 
             <p class="mt-4 rounded-md border border-slate-800 bg-[#0a101c] p-3 text-xs leading-relaxed text-slate-500">
-                Site databases get their own user and password from the Databases page —
-                the root account above is only for administration.
+                The MySQL root password is <span class="text-slate-400">not shown here</span>.
+                Read it on the server with
+                <span class="font-mono text-slate-400">sudo cat /root/.panel-secrets</span>.
+                Site databases get their own user and password from the Databases page.
             </p>
         </div>
 
@@ -199,15 +187,4 @@
             </ul>
         </div>
     </div>
-@endsection
-
-@section('scripts')
-    <script>
-        function toggleSecret() {
-            const el = document.getElementById('db-secret');
-            const shown = el.dataset.shown === '1';
-            el.dataset.shown = shown ? '0' : '1';
-            el.textContent = shown ? '••••••••••' : el.dataset.value;
-        }
-    </script>
 @endsection

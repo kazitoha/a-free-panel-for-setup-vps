@@ -75,6 +75,10 @@ class ProjectSpec
             $errors['repo_url'] = 'Repository URL is too long.';
         } elseif (preg_match('#^(https?://|git@|ssh://)[A-Za-z0-9][A-Za-z0-9._:/@%+~?&=-]*$#', $repo) !== 1) {
             $errors['repo_url'] = 'Enter a git URL like https://github.com/user/repo.git or git@github.com:user/repo.git.';
+        } elseif (($hostError = self::repoHostError($repo)) !== null) {
+            // The clone runs as root, so a URL pointing at an internal service
+            // (localhost, private ranges, cloud metadata) would be an SSRF.
+            $errors['repo_url'] = $hostError;
         }
 
         // --- branch ---------------------------------------------------------
@@ -123,5 +127,96 @@ class ProjectSpec
             'php_version' => (string) $site['php_version'],
             'path' => $path,
         ];
+    }
+
+    /**
+     * Why this repository URL must not be contacted, or null when it is safe.
+     */
+    private static function repoHostError(string $repo): ?string
+    {
+        $host = self::repoHost($repo);
+
+        if ($host === null) {
+            return 'Repository URL could not be parsed — use a host name, not an IP literal.';
+        }
+
+        if (self::isPrivateHost($host)) {
+            return 'Repository host looks like a private, loopback or reserved address — use a public host name.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract the host from a git URL (https://, ssh:// or scp-style user@host:path).
+     */
+    private static function repoHost(string $repo): ?string
+    {
+        if (preg_match('#^(?:https?|ssh)://(?:[^/@]*@)?(\[[^\]]+\]|[^/:?#]+)#i', $repo, $matches) === 1) {
+            $host = $matches[1];
+
+            return str_starts_with($host, '[') ? substr($host, 1, -1) : $host;
+        }
+
+        if (preg_match('#^[^@/:]+@([^/:?#]+)#', $repo, $matches) === 1) {
+            return $matches[1];
+        }
+
+        return null;
+    }
+
+    /**
+     * True for loopback, private, link-local, cloud-metadata and reserved hosts.
+     */
+    private static function isPrivateHost(string $host): bool
+    {
+        $host = strtolower(rtrim($host, '.'));
+
+        if ($host === '') {
+            return true;
+        }
+
+        // Host names that only ever resolve inside a private network.
+        $blockedNames = ['localhost', 'localhost.localdomain'];
+
+        foreach ($blockedNames as $blocked) {
+            if ($host === $blocked || str_ends_with($host, '.'.$blocked)) {
+                return true;
+            }
+        }
+
+        if (str_ends_with($host, '.local')
+            || str_ends_with($host, '.internal')
+            || str_ends_with($host, '.home.arpa')
+            || str_ends_with($host, '.localdomain')) {
+            return true;
+        }
+
+        $ip = filter_var($host, FILTER_VALIDATE_IP);
+
+        if ($ip === false) {
+            return false; // A host name — DNS resolves it at clone time, not here.
+        }
+
+        $flags = FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE;
+
+        if (filter_var($ip, FILTER_VALIDATE_IP, $flags) === false) {
+            return true;
+        }
+
+        // Ranges PHP's flags do not cover (CGNAT, TEST-NET, benchmarking).
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            $long = (int) sprintf('%u', ip2long($ip));
+
+            foreach ([[0x64400000, 10], [0xC0000000, 24], [0xC6120000, 15]] as [$net, $bits]) {
+                $mask = $bits === 0 ? 0 : (-1 << (32 - $bits)) & 0xFFFFFFFF;
+
+                if (($long & $mask) === $net) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

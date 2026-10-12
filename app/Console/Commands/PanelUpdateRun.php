@@ -137,9 +137,14 @@ class PanelUpdateRun extends Command
 
         $this->line('Installing composer dependencies...');
         $this->mustRun(
-            ['composer', 'install', '--quiet', '--no-dev', '--optimize-autoloader', '--no-interaction', '--working-dir', $dir],
+            ['composer', 'install', '--quiet', '--no-dev', '--optimize-autoloader', '--no-interaction', '--no-scripts', '--working-dir', $dir],
             600,
         );
+
+        // Scripts are disabled so a compromised package cannot execute code as
+        // root here — rediscover the trusted panel package manifest explicitly.
+        $this->line('Discovering packages...');
+        $this->mustRun(['php', 'artisan', 'package:discover', '--ansi', '--no-interaction'], 120, $dir);
     }
 
     /**

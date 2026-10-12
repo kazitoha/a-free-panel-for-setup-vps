@@ -54,10 +54,12 @@ class PanelAdminCreate extends Command
 
         $existing = User::query()->where('email', $email)->first();
 
-        User::query()->updateOrCreate(
-            ['email' => $email],
-            ['name' => $name, 'password' => Hash::make($password)],
-        );
+        $user = $existing ?? new User;
+        $user->email = $email;
+        $user->name = $name;
+        $user->password = Hash::make($password);
+        $user->is_admin = true;
+        $user->save();
 
         $this->info($existing !== null
             ? "Updated administrator {$email}."

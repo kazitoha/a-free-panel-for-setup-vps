@@ -29,7 +29,6 @@ class DatabaseController extends Controller
                 'size' => $this->formatSize($liveRow['size_kb'] ?? null),
                 'tables' => $liveRow !== null ? (int) $liveRow['tables'] : null,
                 'present' => $live === null ? null : $liveRow !== null,
-                'password' => $database->password,
             ];
         });
 
@@ -59,10 +58,10 @@ class DatabaseController extends Controller
 
         $result = $this->sudo->run([
             'panel:database:create',
+            '--password-stdin',
             $spec['name'],
             $spec['username'],
-            $spec['password'],
-        ], 60.0);
+        ], 60.0, $spec['password']."\n");
 
         if ($result['exit'] !== 0) {
             return back()->with('error', $this->failureMessage('create the database', $result))
@@ -72,7 +71,7 @@ class DatabaseController extends Controller
         Database::create($spec);
 
         return redirect()->route('databases.index')
-            ->with('success', "Database {$spec['name']} created. Credentials: {$spec['username']} / {$spec['password']}");
+            ->with('success', "Database {$spec['name']} created. Reveal the credentials with the show button.");
     }
 
     public function password(Request $request, Database $database): RedirectResponse
@@ -86,9 +85,9 @@ class DatabaseController extends Controller
 
         $result = $this->sudo->run([
             'panel:database:user-password',
+            '--password-stdin',
             $database->username,
-            $password,
-        ], 60.0);
+        ], 60.0, $password."\n");
 
         if ($result['exit'] !== 0) {
             return back()->with('error', $this->failureMessage('rotate the password', $result));

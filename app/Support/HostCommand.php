@@ -17,13 +17,18 @@ class HostCommand
      * @param  list<string>  $command
      * @param  array<string, string>|null  $env  Extra environment variables merged into the process.
      * @param  string|null  $cwd  Working directory for the process.
+     * @param  string|null  $input  Data written to the process's standard input.
      * @return array{exit: int, stdout: string, stderr: string}
      */
-    public function run(array $command, float $timeout = 60.0, ?array $env = null, ?string $cwd = null): array
+    public function run(array $command, float $timeout = 60.0, ?array $env = null, ?string $cwd = null, ?string $input = null): array
     {
         try {
             $process = new Process($command, $cwd, $env);
             $process->setTimeout($timeout);
+
+            if ($input !== null) {
+                $process->setInput($input);
+            }
 
             try {
                 $process->run();

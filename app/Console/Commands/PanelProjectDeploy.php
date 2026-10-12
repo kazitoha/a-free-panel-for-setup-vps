@@ -124,7 +124,7 @@ class PanelProjectDeploy extends Command
             if ($this->binaryAvailable('composer')) {
                 $this->line('Installing composer dependencies...');
                 $this->mustRun(
-                    ['composer', 'install', '--no-dev', '--no-interaction', '--prefer-dist', '--optimize-autoloader'],
+                    ['composer', 'install', '--no-dev', '--no-interaction', '--prefer-dist', '--optimize-autoloader', '--no-scripts'],
                     900,
                     $path,
                 );

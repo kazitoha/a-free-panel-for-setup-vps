@@ -6,6 +6,7 @@ use App\Exceptions\InvalidDatabase;
 use App\Support\DatabaseSpec;
 use App\Support\HostCommand;
 use App\Support\MySql;
+use App\Support\SecretInput;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -13,12 +14,14 @@ use Illuminate\Console\Command;
 #[Signature('panel:database:create
     {name : Database name}
     {username : MySQL username}
-    {password : Password for the username}')]
+    {--password-stdin : Read the password from standard input (never the process table)}')]
 #[Description('Create a MySQL database and its user (runs as root via the panel runner).')]
 class PanelDatabaseCreate extends Command
 {
-    public function __construct(private readonly HostCommand $command)
-    {
+    public function __construct(
+        private readonly HostCommand $command,
+        private readonly SecretInput $secrets,
+    ) {
         parent::__construct();
     }
 
@@ -27,11 +30,17 @@ class PanelDatabaseCreate extends Command
      */
     public function handle(): int
     {
+        if (! $this->option('password-stdin')) {
+            $this->error('Provide the password on standard input with --password-stdin.');
+
+            return self::FAILURE;
+        }
+
         try {
             $spec = DatabaseSpec::validate([
                 'name' => (string) $this->argument('name'),
                 'username' => (string) $this->argument('username'),
-                'password' => (string) $this->argument('password'),
+                'password' => $this->secrets->read(),
             ]);
         } catch (InvalidDatabase $exception) {
             foreach ($exception->errors as $message) {

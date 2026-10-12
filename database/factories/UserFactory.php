@@ -30,6 +30,7 @@ class UserFactory extends Factory
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
+            'is_admin' => true,
         ];
     }
 
@@ -40,6 +41,16 @@ class UserFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'email_verified_at' => null,
+        ]);
+    }
+
+    /**
+     * Indicate that the account is a non-administrator.
+     */
+    public function nonAdmin(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'is_admin' => false,
         ]);
     }
 }

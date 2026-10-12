@@ -138,6 +138,11 @@ class AuthController extends Controller
                 ->with('error', "Google account {$email} is not authorized for this panel — sign in with the admin password once to link it.");
         }
 
+        if (! $user->is_admin) {
+            return redirect()->route('login')
+                ->with('error', "Google account {$email} is not a panel administrator.");
+        }
+
         $user->forceFill(['google_id' => $sub])->save();
 
         Auth::login($user, remember: false);

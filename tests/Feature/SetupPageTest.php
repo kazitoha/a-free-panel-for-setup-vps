@@ -73,14 +73,14 @@ class SetupPageTest extends TestCase
             ->assertSee(PHP_VERSION);
     }
 
-    public function test_setup_page_shows_database_root_credentials_masked(): void
+    public function test_setup_page_never_exposes_the_database_root_password(): void
     {
         $this->actingAs(User::factory()->create())
             ->get(route('setup.index'))
             ->assertOk()
             ->assertSee('Root user')
-            ->assertSee('••••••••••')
-            ->assertSee('data-value="s3cret-root"', false);
+            ->assertSee('not shown here')
+            ->assertDontSee('s3cret-root');
     }
 
     public function test_setup_page_reports_reachable_powerdns_and_existing_zone(): void

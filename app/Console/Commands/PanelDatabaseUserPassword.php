@@ -6,18 +6,21 @@ use App\Exceptions\InvalidDatabase;
 use App\Support\DatabaseSpec;
 use App\Support\HostCommand;
 use App\Support\MySql;
+use App\Support\SecretInput;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 
 #[Signature('panel:database:user-password
     {username : MySQL username}
-    {password : New password}')]
+    {--password-stdin : Read the new password from standard input (never the process table)}')]
 #[Description('Rotate the password of a panel-created MySQL user (runs as root via the panel runner).')]
 class PanelDatabaseUserPassword extends Command
 {
-    public function __construct(private readonly HostCommand $command)
-    {
+    public function __construct(
+        private readonly HostCommand $command,
+        private readonly SecretInput $secrets,
+    ) {
         parent::__construct();
     }
 
@@ -26,9 +29,17 @@ class PanelDatabaseUserPassword extends Command
      */
     public function handle(): int
     {
+        if (! $this->option('password-stdin')) {
+            $this->error('Provide the new password on standard input with --password-stdin.');
+
+            return self::FAILURE;
+        }
+
+        $password = $this->secrets->read();
+
         try {
             $username = DatabaseSpec::validateUsername((string) $this->argument('username'));
-            DatabaseSpec::assertPassword((string) $this->argument('password'));
+            DatabaseSpec::assertPassword($password);
         } catch (InvalidDatabase $exception) {
             foreach ($exception->errors as $message) {
                 $this->error($message);
@@ -38,7 +49,7 @@ class PanelDatabaseUserPassword extends Command
         }
 
         $user = MySql::literal($username);
-        $password = MySql::literal((string) $this->argument('password'));
+        $passwordLiteral = MySql::literal($password);
 
         $exists = MySql::query($this->command, "SELECT USER FROM mysql.user WHERE User = {$user}");
 
@@ -58,8 +69,8 @@ class PanelDatabaseUserPassword extends Command
             return self::FAILURE;
         }
 
-        $sql = "ALTER USER {$user}@'localhost' IDENTIFIED BY {$password}; "
-            ."ALTER USER {$user}@'127.0.0.1' IDENTIFIED BY {$password};";
+        $sql = "ALTER USER {$user}@'localhost' IDENTIFIED BY {$passwordLiteral}; "
+            ."ALTER USER {$user}@'127.0.0.1' IDENTIFIED BY {$passwordLiteral};";
 
         $alter = MySql::query($this->command, $sql, 60.0);
 

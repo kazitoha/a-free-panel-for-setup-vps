@@ -25,7 +25,7 @@ class SetupService
      *     alt_urls: list<array{url: string, note: string}>,
      *     php: array{installed: string, running: string},
      *     admin: string|null,
-     *     database: array{engine: string, user: string, password: string},
+     *     database: array{engine: string, user: string},
      *     dns: array{
      *         ns_domain: string,
      *         ns1: string,
@@ -75,7 +75,6 @@ class SetupService
             'database' => [
                 'engine' => $this->databaseEngine(),
                 'user' => 'root',
-                'password' => (string) config('panel.mysql.root_password', ''),
             ],
             'dns' => [
                 'ns_domain' => $nsDomain,
