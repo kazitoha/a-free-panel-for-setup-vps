@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Support\InstallStatus;
 use Throwable;
 
 /**
@@ -57,7 +58,7 @@ class SetupService
 
         $zones = $this->zones();
 
-        $items = [
+        $items = array_merge($this->installItems(), [
             $this->panelItem(),
             $this->phpItem($installed, $running),
             $this->caddyItem($domain),
@@ -66,7 +67,7 @@ class SetupService
             $this->zoneItem($zones, $domain),
             $this->phpMyAdminItem($domain),
             $this->emailItem($domain),
-        ];
+        ]);
 
         return [
             'domain' => $domain,
@@ -193,6 +194,33 @@ class SetupService
         }
 
         return 'MySQL (not detected)';
+    }
+
+    /**
+     * Bootstrap installer steps that did not finish, so a failed step is named
+     * on the Setup page instead of the panel silently being half-installed.
+     * Empty when install-panel.sh completed cleanly (or never ran here).
+     *
+     * @return list<array{key: string, label: string, status: 'ok'|'pending'|'fail', detail: string, optional: bool, action: array{label: string, url: string, method: 'GET'|'POST'|'external'}|null}>
+     */
+    private function installItems(): array
+    {
+        $items = [];
+
+        foreach (InstallStatus::problems() as $step) {
+            $failed = $step['status'] === 'failed';
+
+            $items[] = $this->item(
+                'install:'.$step['key'],
+                'Install · '.$step['label'],
+                $failed ? 'fail' : 'pending',
+                $failed
+                    ? 'This step failed: '.($step['message'] ?? 'see the installer log for details.')
+                    : 'This installer step has not finished yet.',
+            );
+        }
+
+        return $items;
     }
 
     /**

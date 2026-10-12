@@ -20,12 +20,17 @@ class SetupPageTest extends TestCase
 
     private string $sitesDir;
 
+    private string $statusDir;
+
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->sitesDir = sys_get_temp_dir().'/panel-setup-'.uniqid();
         mkdir($this->sitesDir, 0755, true);
+
+        $this->statusDir = sys_get_temp_dir().'/panel-install-status-'.uniqid();
+        mkdir($this->statusDir.'/steps', 0755, true);
 
         config([
             'panel.domain' => 'panel.example.com',
@@ -34,6 +39,7 @@ class SetupPageTest extends TestCase
             'panel.mysql.root_password' => 's3cret-root',
             'panel.caddyfile' => '/nonexistent/Caddyfile',
             'panel.caddy_sites_dir' => $this->sitesDir,
+            'panel.install.status_dir' => $this->statusDir,
         ]);
 
         Http::fake([
@@ -53,6 +59,14 @@ class SetupPageTest extends TestCase
         }
 
         @rmdir($this->sitesDir);
+
+        foreach (glob($this->statusDir.'/steps/*.json') ?: [] as $file) {
+            @unlink($file);
+        }
+
+        @unlink($this->statusDir.'/manifest.json');
+        @rmdir($this->statusDir.'/steps');
+        @rmdir($this->statusDir);
 
         parent::tearDown();
     }
@@ -223,5 +237,48 @@ class SetupPageTest extends TestCase
             ->get(route('setup.index'))
             ->assertOk()
             ->assertSee('did not answer');
+    }
+
+    public function test_setup_page_names_the_installer_step_that_failed(): void
+    {
+        $this->writeInstallStep('60-code', 'Panel code', 'success');
+        $this->writeInstallStep('70-app', 'Laravel application', 'failed', 'composer install failed — no network');
+
+        $this->actingAs(User::factory()->create())
+            ->get(route('setup.index'))
+            ->assertOk()
+            ->assertSee('Install · Laravel application')
+            ->assertSee('This step failed: composer install failed — no network');
+    }
+
+    public function test_setup_page_stays_quiet_after_a_clean_install(): void
+    {
+        $this->writeInstallStep('60-code', 'Panel code', 'success');
+        $this->writeInstallStep('70-app', 'Laravel application', 'success');
+
+        $this->actingAs(User::factory()->create())
+            ->get(route('setup.index'))
+            ->assertOk()
+            ->assertDontSee('Install · ');
+    }
+
+    private function writeInstallStep(string $key, string $label, string $status, ?string $message = null): void
+    {
+        $manifestPath = $this->statusDir.'/manifest.json';
+        $manifest = [];
+
+        if (is_file($manifestPath)) {
+            $manifest = json_decode((string) file_get_contents($manifestPath), true)['steps'] ?? [];
+        }
+
+        $manifest[] = ['key' => $key, 'label' => $label];
+        file_put_contents($manifestPath, json_encode(['steps' => $manifest]));
+
+        file_put_contents($this->statusDir.'/steps/'.$key.'.json', json_encode([
+            'key' => $key,
+            'label' => $label,
+            'status' => $status,
+            'message' => $message,
+        ]));
     }
 }

@@ -117,6 +117,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Bootstrap install status
+    |--------------------------------------------------------------------------
+    |
+    | install-panel.sh runs scripts/install/*.sh and records one JSON result
+    | per step under this root-owned directory (manifest.json + steps/*.json).
+    | The Setup page reads it to name the step that failed and why. The
+    | directory is absent on a development install, and then nothing shows.
+    |
+    */
+
+    'install' => [
+        'status_dir' => env('PANEL_INSTALL_STATUS_DIR', '/var/lib/panel/install'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Backups & scheduler
     |--------------------------------------------------------------------------
     |
