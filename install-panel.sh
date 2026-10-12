@@ -30,6 +30,8 @@ CODE_ACTION=""
 OVERWRITE_BACKUP_DIR=""
 MYSQL_PASSWORD_GIVEN=0
 MYSQL_PASSWORD=""
+MYSQL_PENDING=0
+SETUP_STEPS=()
 
 # Works both from a checkout and piped (curl … | bash), where BASH_SOURCE is unset.
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
@@ -56,7 +58,8 @@ Usage: sudo bash install-panel.sh [options]
 
 Options:
   --domain=HOST      Panel hostname (e.g. panel.example.com)
-  --email=EMAIL      Administrator email
+  --email=EMAIL      Administrator email (when omitted, the account is created
+                     on the setup page the panel shows after the install)
   --password=PASS    Administrator password (min 8 characters; generated when omitted)
   --repo=URL         Git repository to install from
   --branch=NAME      Git branch (default: main)
@@ -67,7 +70,9 @@ Options:
   --php=VERSION      PHP version to install (default: 8.3)
   --ns-domain=HOST   Nameserver domain for the DNS module (default: panel domain)
   --mysql-password=P MySQL root password: set it to P, or use P to unlock a
-                     MySQL that is already secured (stored in /root/.panel-secrets)
+                     MySQL that is already secured (stored in /root/.panel-secrets).
+                     When it does not unlock, the install continues and the
+                     password is collected on the setup page afterwards
   --local            Install from the directory containing this script
   --non-interactive  Never prompt; fail when a required value is missing
   -h, --help         Show this help
@@ -216,7 +221,6 @@ fi
 
 if [[ "$NON_INTERACTIVE" == "1" ]]; then
     [[ -n "$PANEL_DOMAIN" ]] || fail "--domain is required in non-interactive mode."
-    [[ -n "$ADMIN_EMAIL"  ]] || fail "--email is required in non-interactive mode."
 fi
 
 # ---------------------------------------------------------------
@@ -233,11 +237,10 @@ if [[ -z "$PANEL_DOMAIN" ]]; then
 fi
 
 if [[ -z "$ADMIN_EMAIL" ]]; then
-    prompt ADMIN_EMAIL "Administrator email"
-    [[ "$ADMIN_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || fail "Invalid email address."
+    prompt ADMIN_EMAIL "Administrator email (blank = create the account on the setup page)"
 fi
 
-if [[ -z "$ADMIN_PASSWORD" && "$NON_INTERACTIVE" != "1" ]]; then
+if [[ -n "$ADMIN_EMAIL" && -z "$ADMIN_PASSWORD" && "$NON_INTERACTIVE" != "1" ]]; then
     while :; do
         prompt_secret ADMIN_PASSWORD "Administrator password (blank = generate)"
         [[ -z "$ADMIN_PASSWORD" || ${#ADMIN_PASSWORD} -ge 8 ]] && break
@@ -245,7 +248,7 @@ if [[ -z "$ADMIN_PASSWORD" && "$NON_INTERACTIVE" != "1" ]]; then
     done
 fi
 
-if [[ -z "$ADMIN_PASSWORD" ]]; then
+if [[ -n "$ADMIN_EMAIL" && -z "$ADMIN_PASSWORD" ]]; then
     ADMIN_PASSWORD="$(openssl rand -hex 12)"
     GENERATED_PASSWORD=1
 else
@@ -254,10 +257,14 @@ fi
 
 # Credential rules enforced later by `panel:admin:create` — check them here,
 # before any package is installed, instead of failing after ten minutes.
-[[ "$ADMIN_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] \
-    || fail "Invalid --email value: ${ADMIN_EMAIL}"
-if [[ "$GENERATED_PASSWORD" -eq 0 && ${#ADMIN_PASSWORD} -lt 8 ]]; then
-    fail "--password must be at least 8 characters (got ${#ADMIN_PASSWORD}) — pick a longer one and re-run."
+if [[ -n "$ADMIN_EMAIL" ]]; then
+    [[ "$ADMIN_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] \
+        || fail "Invalid --email value: ${ADMIN_EMAIL}"
+    if [[ "$GENERATED_PASSWORD" -eq 0 && ${#ADMIN_PASSWORD} -lt 8 ]]; then
+        fail "--password must be at least 8 characters (got ${#ADMIN_PASSWORD}) — pick a longer one and re-run."
+    fi
+else
+    info "No administrator email given — the account is created on the setup page after this install."
 fi
 # --- end credential checks ---------------------------------------------------
 
@@ -518,22 +525,30 @@ else
     fi
 
     if [[ "$MYSQL_UNLOCKED" -eq 0 ]]; then
-        fail "Cannot log in to MySQL as root.
+        # Not fatal: everything else can still be installed. The password is
+        # collected on the setup page the panel shows afterwards.
+        MYSQL_PENDING=1
+        SETUP_STEPS+=(mysql)
+        warn "Cannot log in to MySQL as root — deferring this to the setup page.
        MySQL is secured with a password this installer does not know (it was
-       set outside the panel). Re-run it with the current password:
-         sudo bash install-panel.sh --mysql-password='<current mysql root password>'
-       In an interactive terminal you can also re-run it without
-       --non-interactive and you will be asked for it."
-    fi
-
-    mysql_set_root_password "$CURRENT_MYSQL_PASSWORD" "$MYSQL_ROOT_PASSWORD" \
-        || fail "Could not set the MySQL root password."
-
-    if mysql_password_works "$MYSQL_ROOT_PASSWORD"; then
-        ok "MySQL root password set (stored in ${SECRETS_FILE})."
+       set outside the panel). After the install, open the panel and enter
+       the current root password there (or re-run with --mysql-password=…)."
     else
-        warn "MySQL accepted the new password on the socket, but it could not be verified over TCP (127.0.0.1:3306) — the panel's Databases module needs MySQL to listen on TCP."
+        mysql_set_root_password "$CURRENT_MYSQL_PASSWORD" "$MYSQL_ROOT_PASSWORD" \
+            || fail "Could not set the MySQL root password."
+
+        if mysql_password_works "$MYSQL_ROOT_PASSWORD"; then
+            ok "MySQL root password set (stored in ${SECRETS_FILE})."
+        else
+            warn "MySQL accepted the new password on the socket, but it could not be verified over TCP (127.0.0.1:3306) — the panel's Databases module needs MySQL to listen on TCP."
+        fi
     fi
+fi
+
+# Never record a password MySQL does not have: an unlocked-out run leaves it
+# empty until the setup page supplies the real one.
+if [[ "$MYSQL_PENDING" == "1" ]]; then
+    MYSQL_ROOT_PASSWORD=""
 fi
 
 # Written only once MySQL has accepted it — a failed run must not record a
@@ -717,7 +732,10 @@ info "Installing PowerDNS authoritative server..."
 apt-get install -y -qq pdns-server pdns-backend-mysql
 
 info "Configuring PowerDNS database..."
-MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket -uroot <<SQL || fail "Could not configure the PowerDNS database."
+if [[ "$MYSQL_PENDING" == "1" ]]; then
+    warn "Skipping the PowerDNS database — MySQL is still locked. It is created (and pdns restarted) from the setup page once you enter the MySQL root password."
+else
+    MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket -uroot <<SQL || fail "Could not configure the PowerDNS database."
 CREATE DATABASE IF NOT EXISTS pdns;
 CREATE USER IF NOT EXISTS 'pdns_user'@'localhost' IDENTIFIED BY '${PDNS_DB_PASSWORD}';
 ALTER USER 'pdns_user'@'localhost' IDENTIFIED BY '${PDNS_DB_PASSWORD}';
@@ -725,7 +743,7 @@ GRANT ALL PRIVILEGES ON pdns.* TO 'pdns_user'@'localhost';
 FLUSH PRIVILEGES;
 SQL
 
-MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket -uroot pdns <<'SQL' || fail "Could not create the PowerDNS schema (see the SQL error above)."
+    MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket -uroot pdns <<'SQL' || fail "Could not create the PowerDNS schema (see the SQL error above)."
 CREATE TABLE IF NOT EXISTS domains (
   id                    INT AUTO_INCREMENT,
   name                  VARCHAR(255) NOT NULL,
@@ -803,6 +821,7 @@ CREATE TABLE IF NOT EXISTS tsigkeys (
   UNIQUE KEY name_algo_index (name, algorithm)
 ) Engine=InnoDB;
 SQL
+fi
 
 # pdns.conf: write the full config on a fresh install, otherwise only make
 # sure the HTTP API block exists on top of whatever is already configured.
@@ -1041,12 +1060,17 @@ if ! php artisan panel:update:check --no-interaction; then
     warn "Could not check for panel updates — the hourly cron check will retry."
 fi
 
-info "Creating administrator ${ADMIN_EMAIL}..."
-if ! php artisan panel:admin:create "$ADMIN_EMAIL" \
-    --password="$ADMIN_PASSWORD" \
-    --name="Admin" \
-    --no-interaction; then
-    fail "Could not create the administrator account — see the output above."
+if [[ -z "$ADMIN_EMAIL" ]]; then
+    ok "Administrator account deferred — it is created on the setup page."
+    SETUP_STEPS+=(admin)
+else
+    info "Creating administrator ${ADMIN_EMAIL}..."
+    if ! php artisan panel:admin:create "$ADMIN_EMAIL" \
+        --password="$ADMIN_PASSWORD" \
+        --name="Admin" \
+        --no-interaction; then
+        fail "Could not create the administrator account — see the output above."
+    fi
 fi
 
 # Store the panel login next to the other secrets so a re-run (or a lost
@@ -1066,10 +1090,30 @@ upsert_secret() {
     rm -f "$tmp"
 }
 
-upsert_secret PANEL_ADMIN_EMAIL "$ADMIN_EMAIL"
-upsert_secret PANEL_ADMIN_PASSWORD "$ADMIN_PASSWORD"
-chmod 600 "$SECRETS_FILE"
-ok "Administrator saved to ${SECRETS_FILE}."
+if [[ -n "$ADMIN_EMAIL" ]]; then
+    upsert_secret PANEL_ADMIN_EMAIL "$ADMIN_EMAIL"
+    upsert_secret PANEL_ADMIN_PASSWORD "$ADMIN_PASSWORD"
+    chmod 600 "$SECRETS_FILE"
+    ok "Administrator saved to ${SECRETS_FILE}."
+fi
+
+# ---------------------------------------------------------------
+# What still has to be filled in on the setup page
+# ---------------------------------------------------------------
+
+SETUP_MARKER="${PANEL_DIR}/storage/app/setup-pending.json"
+if ((${#SETUP_STEPS[@]})); then
+    mkdir -p "${PANEL_DIR}/storage/app"
+    cat > "$SETUP_MARKER" <<EOF
+{
+  "steps": [$(printf '"%s",' "${SETUP_STEPS[@]}" | sed 's/,$//')],
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+    chmod 644 "$SETUP_MARKER"
+else
+    rm -f "$SETUP_MARKER"
+fi
 
 # ---------------------------------------------------------------
 # Frontend assets
@@ -1232,22 +1276,45 @@ else
 fi
 echo "  2. Point DNS: ${PANEL_DOMAIN} → this server's public IP"
 echo "     (Caddy issues the certificate automatically once DNS resolves)"
-echo "  3. Sign in with the credentials below"
+if [[ -n "$ADMIN_EMAIL" ]]; then
+    echo "  3. Sign in with the credentials below"
+else
+    echo "  3. Finish setup in the browser (the panel asks for it first)"
+fi
 echo "  4. For the DNS module: register ns1.${PDNS_NS_DOMAIN} / ns2.${PDNS_NS_DOMAIN}"
 echo "     with your registrar, pointing both at ${PDNS_SERVER_IP:-unknown}"
 echo "  5. Install other modules (Sites, Email, phpMyAdmin) from the panel"
 echo
 echo "  Re-run this script any time to update the panel."
 echo
+if ((${#SETUP_STEPS[@]})); then
+    echo "============================================================"
+    echo "            ONE STEP LEFT — FINISH IN THE BROWSER"
+    echo "============================================================"
+    echo "  Open the panel and the setup page collects what is missing"
+    echo "  (${SETUP_STEPS[*]}) — nothing else has to be installed:"
+    if [[ -n "${PDNS_SERVER_IP:-}" ]]; then
+        echo "       http://${PDNS_SERVER_IP}                  (plain HTTP — setup)"
+        echo "       https://panel.${PDNS_SERVER_IP}.nip.io    (trusted certificate)"
+    fi
+    echo "       https://${PANEL_DOMAIN}"
+    echo "============================================================"
+    echo
+fi
 echo "============================================================"
 echo "              PANEL IS LIVE — SAVE THESE"
 echo "============================================================"
 echo "  Login URL:  https://${PANEL_DOMAIN}/login"
 echo "  Panel URL:  https://${PANEL_DOMAIN}"
-echo "  Email:      ${ADMIN_EMAIL}"
-echo "  Password:   ${ADMIN_PASSWORD}"
-if [[ "$GENERATED_PASSWORD" == "1" ]]; then
-    echo "              (generated — change it after your first login)"
+if [[ -n "$ADMIN_EMAIL" ]]; then
+    echo "  Email:      ${ADMIN_EMAIL}"
+    echo "  Password:   ${ADMIN_PASSWORD}"
+    if [[ "$GENERATED_PASSWORD" == "1" ]]; then
+        echo "              (generated — change it after your first login)"
+    fi
+    echo "  Stored in:  ${SECRETS_FILE} (PANEL_ADMIN_EMAIL / PANEL_ADMIN_PASSWORD)"
+else
+    echo "  Email:      (set on the setup page)"
+    echo "  Password:   (set on the setup page)"
 fi
-echo "  Stored in:  ${SECRETS_FILE} (PANEL_ADMIN_EMAIL / PANEL_ADMIN_PASSWORD)"
 echo "============================================================"

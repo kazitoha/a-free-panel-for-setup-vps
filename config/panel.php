@@ -78,6 +78,38 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Root-owned secrets
+    |--------------------------------------------------------------------------
+    |
+    | MYSQL_ROOT_PASSWORD, the PowerDNS credentials and the administrator
+    | login written by install-panel.sh (and by panel:setup:finish). mode 600,
+    | root only — never readable by the web user.
+    |
+    */
+
+    'secrets_file' => env('PANEL_SECRETS_FILE', '/root/.panel-secrets'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | First-run setup
+    |--------------------------------------------------------------------------
+    |
+    | install-panel.sh writes marker whenever it had to leave a credential
+    | unset (a MySQL root password it could not unlock, or the administrator
+    | account itself). While that file exists — or no administrator exists
+    | yet — the panel shows /first-run instead of the login page, and the
+    | completed run deletes it. env_file is the .env the privileged
+    | setup command rewrites.
+    |
+    */
+
+    'setup' => [
+        'marker' => env('PANEL_SETUP_MARKER', storage_path('app/setup-pending.json')),
+        'env_file' => env('PANEL_ENV_FILE', base_path('.env')),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Backups & scheduler
     |--------------------------------------------------------------------------
     |
@@ -162,6 +194,7 @@ return [
         'server' => env('PDNS_API_SERVER', 'localhost'),
         'ns_domain' => env('PDNS_NS_DOMAIN'),
         'server_ip' => env('PDNS_SERVER_IP'),
+        'conf_file' => env('PDNS_CONF_FILE', '/etc/powerdns/pdns.conf'),
     ],
 
     /*

@@ -8,6 +8,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DatabaseController;
 use App\Http\Controllers\DnsController;
 use App\Http\Controllers\DnsRecordController;
+use App\Http\Controllers\FirstRunController;
 use App\Http\Controllers\InstallController;
 use App\Http\Controllers\LogsController;
 use App\Http\Controllers\MailboxController;
@@ -21,7 +22,9 @@ use App\Http\Controllers\UpdateController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('guest')->group(function () {
-    Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
+    Route::get('/login', [AuthController::class, 'showLogin'])
+        ->middleware('setup.complete')
+        ->name('login');
     Route::post('/login', [AuthController::class, 'login'])
         ->middleware('throttle:5,1')
         ->name('login.attempt');
@@ -33,7 +36,17 @@ Route::middleware('guest')->group(function () {
         ->name('auth.google.callback');
 });
 
-Route::middleware(['auth', 'admin'])->group(function () {
+// Credentials the installer could not set itself (a MySQL root password it
+// was never given, or the administrator account) are collected here, before
+// anything else, until no step is pending any more.
+Route::middleware('setup.pending')->group(function () {
+    Route::get('/first-run', [FirstRunController::class, 'show'])->name('firstrun.index');
+    Route::post('/first-run', [FirstRunController::class, 'store'])
+        ->middleware('throttle:5,1')
+        ->name('firstrun.store');
+});
+
+Route::middleware(['auth', 'admin', 'setup.complete'])->group(function () {
     Route::get('/', DashboardController::class)->name('dashboard');
     Route::get('/setup', SetupController::class)->name('setup.index');
     Route::post('/services/restart', [ServiceController::class, 'restart'])
