@@ -5,30 +5,52 @@ namespace App\Http\Controllers;
 use App\Exceptions\InvalidDnsRecord;
 use App\Exceptions\PowerDnsError;
 use App\Exceptions\PowerDnsUnavailable;
+use App\Models\Install;
 use App\Services\DnsService;
+use App\Services\InstallStarter;
 use App\Services\SystemService;
 use App\Support\DnsSpec;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use RuntimeException;
 
 class DnsController extends Controller
 {
     public function __construct(
         private readonly DnsService $dns,
         private readonly SystemService $system,
+        private readonly InstallStarter $starter,
     ) {}
 
     public function index(): View
     {
         $status = $this->dns->status();
+        $latest = Install::ofType('pdns')->latest('id')->first();
 
         return view('dns.index', [
             'status' => $status,
             'zones' => $status === 'ok' ? $this->dns->zones() : [],
             'nsDomain' => $this->nsDomain(),
             'defaultIp' => $this->defaultIp(),
+            'active' => $latest?->isActive() ? $latest : null,
+            'latest' => $latest,
         ]);
+    }
+
+    /**
+     * Install PowerDNS (and MySQL first, when it is missing): the DNS
+     * module's own first step.
+     */
+    public function install(): RedirectResponse
+    {
+        try {
+            $install = $this->starter->start('pdns', 'Install PowerDNS', 'panel:pdns:install');
+        } catch (RuntimeException $exception) {
+            return back()->with('error', InstallStarter::failureMessage($exception));
+        }
+
+        return redirect()->route('installs.show', $install);
     }
 
     public function create(): View|RedirectResponse

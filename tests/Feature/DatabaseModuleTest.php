@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Database;
+use App\Models\Install;
 use App\Models\User;
 use App\Services\SudoRunner;
 use App\Support\HostCommand;
@@ -45,7 +46,7 @@ class DatabaseModuleTest extends TestCase
             ->assertDontSee('secret1234');
     }
 
-    public function test_index_still_renders_when_mysql_is_unreachable(): void
+    public function test_index_offers_the_mysql_install_when_the_server_is_unreachable(): void
     {
         Database::create(['name' => 'myapp', 'username' => 'myapp', 'password' => 'secret1234']);
 
@@ -59,7 +60,55 @@ class DatabaseModuleTest extends TestCase
             ->get(route('databases.index'))
             ->assertOk()
             ->assertSee('myapp')
-            ->assertSee('Could not reach MySQL');
+            ->assertSee('mysql not reachable')
+            ->assertSee(route('databases.install'), false)
+            ->assertSee('Install MySQL');
+    }
+
+    public function test_install_spawns_the_background_installer_and_redirects(): void
+    {
+        $this->partialMock(HostCommand::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('run')
+                ->once()
+                ->withArgs(function (array $command): bool {
+                    $script = $command[2] ?? '';
+
+                    return $command[0] === 'bash'
+                        && str_contains($script, 'sudo -n /usr/local/panel/run panel:mysql:install')
+                        && str_contains($script, '2>&1 &');
+                })
+                ->andReturn(['exit' => 0, 'stdout' => '', 'stderr' => '']);
+        });
+
+        $response = $this->actingAs(User::factory()->create())
+            ->post(route('databases.install'));
+
+        $response->assertRedirect();
+
+        $install = Install::ofType('mysql')->firstOrFail();
+        $this->assertSame('panel:mysql:install', $install->command);
+        $this->assertSame(Install::STATUS_PENDING, $install->status);
+        $this->assertSame(route('installs.show', $install), $response->headers->get('Location'));
+    }
+
+    public function test_a_second_install_uses_the_active_job_instead_of_spawning(): void
+    {
+        $running = Install::create([
+            'type' => 'mysql',
+            'label' => 'Install MySQL',
+            'command' => 'panel:mysql:install',
+            'status' => Install::STATUS_RUNNING,
+        ]);
+
+        $this->partialMock(HostCommand::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('run')->never();
+        });
+
+        $this->actingAs(User::factory()->create())
+            ->post(route('databases.install'))
+            ->assertRedirect(route('installs.show', $running));
+
+        $this->assertSame(1, Install::ofType('mysql')->count());
     }
 
     public function test_store_creates_the_database_and_encodes_the_password(): void

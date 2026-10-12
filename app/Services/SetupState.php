@@ -8,28 +8,28 @@ use Illuminate\Support\Facades\File;
 /**
  * What still has to be filled in before the panel is usable.
  *
- * install-panel.sh leaves a marker behind when it could not set a credential
- * itself — a MySQL root password it was not given, or the administrator
- * account it was not asked to create (both are collected on /first-run
- * instead). While a step is pending the panel serves that page rather than
- * the login form; nothing else can start a setup run.
+ * install-panel.sh leaves a marker behind when it could not create the
+ * administrator account itself (it was not asked to, or was interrupted);
+ * that account is collected on /first-run instead. While a step is pending
+ * the panel serves that page rather than the login form; nothing else can
+ * start a setup run.
+ *
+ * Everything the installer cannot generate on its own is handled elsewhere:
+ * MySQL, PowerDNS and the mail server install themselves from their modules,
+ * each one creating whatever credentials it needs.
  */
 class SetupState
 {
-    /** MySQL root password still has to be supplied. */
-    public const STEP_MYSQL = 'mysql';
-
     /** Administrator account still has to be created. */
     public const STEP_ADMIN = 'admin';
 
     /**
-     * What the installer may record in the marker: the MySQL root password it
-     * could not unlock, and/or the administrator account it was not asked to
-     * create. Both are dropped again as soon as they are satisfied — an
-     * existing administrator cancels the admin step, so the marker can never
-     * offer to mint a second one.
+     * What the installer may record in the marker: the administrator account
+     * it was not asked to create. Dropped again as soon as it exists — an
+     * existing administrator cancels the step, so the marker can never offer
+     * to mint a second one.
      */
-    private const KNOWN_STEPS = [self::STEP_MYSQL, self::STEP_ADMIN];
+    private const KNOWN_STEPS = [self::STEP_ADMIN];
 
     /**
      * Steps that are still outstanding, in the order they are collected.
@@ -96,8 +96,8 @@ class SetupState
 
     /**
      * Steps the installer recorded. A marker that cannot be read still opens
-     * the wizard for the MySQL password — the one step that cannot grant
-     * access by itself.
+     * the wizard for the administrator account — the only step left that a
+     * page has to collect.
      *
      * @return list<string>
      */
@@ -112,18 +112,18 @@ class SetupState
         $raw = @file_get_contents($path);
 
         if ($raw === false) {
-            return [self::STEP_MYSQL];
+            return [self::STEP_ADMIN];
         }
 
         $data = json_decode($raw, true);
 
         if (! is_array($data) || ! isset($data['steps']) || ! is_array($data['steps'])) {
-            return [self::STEP_MYSQL];
+            return [self::STEP_ADMIN];
         }
 
         $steps = array_values(array_unique(array_intersect($data['steps'], self::KNOWN_STEPS)));
 
-        return $steps === [] ? [self::STEP_MYSQL] : $steps;
+        return $steps === [] ? [self::STEP_ADMIN] : $steps;
     }
 
     private function path(): string

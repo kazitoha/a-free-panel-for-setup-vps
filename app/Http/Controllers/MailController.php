@@ -7,9 +7,8 @@ use App\Exceptions\PowerDnsError;
 use App\Exceptions\PowerDnsUnavailable;
 use App\Exceptions\StalwartError;
 use App\Models\Install;
-use App\Services\InstallRunner;
+use App\Services\InstallStarter;
 use App\Services\MailService;
-use App\Services\SudoRunner;
 use App\Services\SystemService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -20,7 +19,7 @@ class MailController extends Controller
 {
     public function __construct(
         private readonly MailService $mail,
-        private readonly InstallRunner $runner,
+        private readonly InstallStarter $starter,
         private readonly SystemService $system,
     ) {}
 
@@ -43,37 +42,10 @@ class MailController extends Controller
 
     public function install(Request $request): RedirectResponse
     {
-        $active = Install::ofType('stalwart')
-            ->whereIn('status', [Install::STATUS_PENDING, Install::STATUS_RUNNING])
-            ->exists();
-
-        if ($active) {
-            return redirect()->route('installs.show', Install::ofType('stalwart')->latest('id')->firstOrFail());
-        }
-
-        $install = Install::create([
-            'type' => 'stalwart',
-            'label' => 'Install Stalwart mail',
-            'command' => 'panel:stalwart:install',
-            'status' => Install::STATUS_PENDING,
-        ]);
-
         try {
-            $this->runner->start($install);
+            $install = $this->starter->start('stalwart', 'Install Stalwart mail', 'panel:stalwart:install');
         } catch (RuntimeException $exception) {
-            $install->forceFill([
-                'status' => Install::STATUS_FAILED,
-                'message' => mb_substr($exception->getMessage(), 0, 500),
-                'finished_at' => now(),
-            ])->save();
-
-            $message = $exception->getMessage();
-
-            if (str_contains($message, 'sudo')) {
-                $message = SudoRunner::denialMessage();
-            }
-
-            return back()->with('error', $message);
+            return back()->with('error', InstallStarter::failureMessage($exception));
         }
 
         return redirect()->route('installs.show', $install);

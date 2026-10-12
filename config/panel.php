@@ -70,6 +70,12 @@ return [
 
     'mysql' => [
         'root_password' => env('MYSQL_ROOT_PASSWORD', ''),
+
+        // Where MySqlSetup drops the temporary skip-grant-tables config while
+        // recovering a root password nobody knows, and the Debian maintenance
+        // account it can try as a last local session.
+        'recovery_file' => env('MYSQL_RECOVERY_FILE', '/etc/mysql/conf.d/panel-recovery.cnf'),
+        'debian_cnf' => env('MYSQL_DEBIAN_CNF', '/etc/mysql/debian.cnf'),
     ],
 
     'reserved_databases' => ['pdns', 'mysql', 'information_schema', 'performance_schema', 'sys'],
@@ -82,7 +88,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | MYSQL_ROOT_PASSWORD, the PowerDNS credentials and the administrator
-    | login written by install-panel.sh (and by panel:setup:finish). mode 600,
+    | login — the installer writes the admin login, the on-demand installers
+    | (panel:mysql:install / panel:pdns:install) write theirs. mode 600,
     | root only — never readable by the web user.
     |
     */

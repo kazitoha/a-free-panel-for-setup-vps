@@ -2,10 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Models\Install;
 use App\Models\User;
+use App\Support\HostCommand;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 class DnsZoneTest extends TestCase
@@ -39,7 +42,7 @@ class DnsZoneTest extends TestCase
         $this->get(route('dns.index'))->assertRedirect(route('login'));
     }
 
-    public function test_index_shows_setup_hint_when_powerdns_is_unreachable(): void
+    public function test_index_offers_the_powerdns_install_when_the_api_is_unreachable(): void
     {
         Http::fake([
             '*' => fn () => throw new ConnectionException('Connection refused'),
@@ -48,8 +51,55 @@ class DnsZoneTest extends TestCase
         $this->actingAs(User::factory()->create())
             ->get(route('dns.index'))
             ->assertOk()
-            ->assertSee('powerdns not reachable')
-            ->assertSee('install-panel.sh');
+            ->assertSee('powerdns not installed')
+            ->assertSee(route('dns.install'), false)
+            ->assertSee('Install PowerDNS');
+    }
+
+    public function test_install_spawns_the_background_installer_and_redirects(): void
+    {
+        $this->partialMock(HostCommand::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('run')
+                ->once()
+                ->withArgs(function (array $command): bool {
+                    $script = $command[2] ?? '';
+
+                    return $command[0] === 'bash'
+                        && str_contains($script, 'sudo -n /usr/local/panel/run panel:pdns:install')
+                        && str_contains($script, '2>&1 &');
+                })
+                ->andReturn(['exit' => 0, 'stdout' => '', 'stderr' => '']);
+        });
+
+        $response = $this->actingAs(User::factory()->create())
+            ->post(route('dns.install'));
+
+        $response->assertRedirect();
+
+        $install = Install::ofType('pdns')->firstOrFail();
+        $this->assertSame('panel:pdns:install', $install->command);
+        $this->assertSame(Install::STATUS_PENDING, $install->status);
+        $this->assertSame(route('installs.show', $install), $response->headers->get('Location'));
+    }
+
+    public function test_a_second_install_uses_the_active_job_instead_of_spawning(): void
+    {
+        $running = Install::create([
+            'type' => 'pdns',
+            'label' => 'Install PowerDNS',
+            'command' => 'panel:pdns:install',
+            'status' => Install::STATUS_RUNNING,
+        ]);
+
+        $this->partialMock(HostCommand::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('run')->never();
+        });
+
+        $this->actingAs(User::factory()->create())
+            ->post(route('dns.install'))
+            ->assertRedirect(route('installs.show', $running));
+
+        $this->assertSame(1, Install::ofType('pdns')->count());
     }
 
     public function test_index_reports_a_rejected_api_key(): void

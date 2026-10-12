@@ -36,9 +36,8 @@ Route::middleware('guest')->group(function () {
         ->name('auth.google.callback');
 });
 
-// Credentials the installer could not set itself (a MySQL root password it
-// was never given, or the administrator account) are collected here, before
-// anything else, until no step is pending any more.
+// The administrator account install-panel.sh was not asked to create is
+// collected here, before anything else, until no step is pending any more.
 Route::middleware('setup.pending')->group(function () {
     Route::get('/first-run', [FirstRunController::class, 'show'])->name('firstrun.index');
     Route::post('/first-run', [FirstRunController::class, 'store'])
@@ -75,6 +74,9 @@ Route::middleware(['auth', 'admin', 'setup.complete'])->group(function () {
         Route::post('/import', [DnsController::class, 'import'])
             ->middleware('throttle:3,1')
             ->name('import');
+        Route::post('/install', [DnsController::class, 'install'])
+            ->middleware('throttle:5,1')
+            ->name('install');
         Route::get('/{zone}', [DnsController::class, 'show'])
             ->where('zone', '[a-z0-9.-]+')
             ->name('show');
@@ -123,6 +125,9 @@ Route::middleware(['auth', 'admin', 'setup.complete'])->group(function () {
         Route::post('/', [DatabaseController::class, 'store'])
             ->middleware('throttle:10,1')
             ->name('store');
+        Route::post('/install', [DatabaseController::class, 'install'])
+            ->middleware('throttle:5,1')
+            ->name('install');
         Route::get('/{database}/credentials', [DatabaseController::class, 'credentials'])
             ->name('credentials');
         Route::post('/{database}/password', [DatabaseController::class, 'password'])

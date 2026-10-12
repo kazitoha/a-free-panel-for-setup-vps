@@ -17,28 +17,41 @@
         @endif
     </div>
 
-    @if ($status === 'unreachable')
+    @if ($status !== 'ok')
         <div class="card p-6">
-            <p class="eyebrow">powerdns not reachable</p>
-            <p class="mt-2 max-w-2xl text-sm text-slate-400">
-                The PowerDNS API did not answer on
-                <span class="font-mono text-slate-300">{{ config('panel.pdns.url') }}</span>.
-                Run <span class="font-mono text-amber-400">install-panel.sh</span> (it installs
-                PowerDNS, enables the API on localhost and creates the nameserver zone),
-                then check <span class="font-mono text-slate-300">systemctl status pdns</span>.
-            </p>
-        </div>
-    @elseif ($status === 'unauthorized')
-        <div class="card p-6">
-            <p class="eyebrow">api key rejected</p>
-            <p class="mt-2 max-w-2xl text-sm text-slate-400">
-                PowerDNS answered but rejected the key. Set
-                <span class="font-mono text-amber-400">PDNS_API_KEY</span> in
-                <span class="font-mono text-slate-300">.env</span> to the
-                <span class="font-mono text-slate-300">api-key</span> from
-                <span class="font-mono text-slate-300">/etc/powerdns/pdns.conf</span>
-                and run <span class="font-mono text-slate-300">php artisan config:clear</span>.
-            </p>
+            <div class="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <p class="eyebrow">{{ $status === 'unauthorized' ? 'api key rejected' : 'powerdns not installed' }}</p>
+                    <p class="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
+                        @if ($status === 'unauthorized')
+                            PowerDNS answered but rejected the key, so zones cannot be edited.
+                            Installing it again re-reads the server, repairs the API key and keeps
+                            the zones that already exist.
+                        @else
+                            The PowerDNS API did not answer on
+                            <span class="font-mono text-slate-300">{{ config('panel.pdns.url') }}</span>.
+                            Installing sets up the authoritative server, its database, the localhost
+                            API and the nameserver zone — MySQL first, when it is missing too.
+                        @endif
+                    </p>
+                </div>
+                @if ($active)
+                    <a href="{{ route('installs.show', $active) }}" class="btn-primary">Watch install ↗</a>
+                @else
+                    <form method="POST" action="{{ route('dns.install') }}"
+                          onsubmit="return confirm('Install PowerDNS now?');">
+                        @csrf
+                        <button type="submit" class="btn-primary">⬇ Install PowerDNS</button>
+                    </form>
+                @endif
+            </div>
+
+            @if ($latest && $latest->status === 'failed')
+                <div class="mt-4 rounded-md border border-rose-900/60 bg-rose-950/30 p-3">
+                    <p class="text-xs text-rose-300">Last attempt failed:</p>
+                    <p class="mt-1 font-mono text-[11px] text-rose-400/80">{{ $latest->message }}</p>
+                </div>
+            @endif
         </div>
     @else
         <div class="card overflow-hidden">

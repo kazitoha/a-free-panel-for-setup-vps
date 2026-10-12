@@ -5,9 +5,13 @@
 #   sudo bash install-panel.sh --domain=panel.example.com --email=you@example.com
 #
 # What it does:
-#   PHP-FPM · MySQL · Composer · Caddy · Node (assets) · panel code ·
-#   PowerDNS (HTTP API) · migrations · admin account · HTTPS site ·
-#   sudo runner · UFW
+#   PHP-FPM · Composer · Caddy (domain + SERVER_IP:PORT) · Node (assets) ·
+#   panel code · migrations · admin account · sudo runner · UFW
+#
+# MySQL, PowerDNS and the mail server are NOT installed here: the panel's
+# own data lives in SQLite, and each module installs its server on demand
+# from the web interface (Databases / DNS / Email), generating whatever
+# credentials it needs along the way.
 #
 # Re-running is safe: installed pieces are reused or refreshed in place.
 
@@ -28,9 +32,7 @@ PDNS_NS_DOMAIN=""
 MODE=""
 CODE_ACTION=""
 OVERWRITE_BACKUP_DIR=""
-MYSQL_PASSWORD_GIVEN=0
-MYSQL_PASSWORD=""
-MYSQL_PENDING=0
+PANEL_PORT=""
 SETUP_STEPS=()
 
 # Works both from a checkout and piped (curl … | bash), where BASH_SOURCE is unset.
@@ -69,10 +71,8 @@ Options:
                      existing code untouched
   --php=VERSION      PHP version to install (default: 8.3)
   --ns-domain=HOST   Nameserver domain for the DNS module (default: panel domain)
-  --mysql-password=P MySQL root password: set it to P, or use P to unlock a
-                     MySQL that is already secured (stored in /root/.panel-secrets).
-                     When it does not unlock, the install continues and the
-                     password is collected on the setup page afterwards
+  --port=PORT        Also serve the panel on SERVER_IP:PORT over plain HTTP
+                     (default: 6669) — usable before DNS resolves
   --local            Install from the directory containing this script
   --non-interactive  Never prompt; fail when a required value is missing
   -h, --help         Show this help
@@ -137,7 +137,7 @@ for argument in "$@"; do
         --code=*)         CODE_ACTION="${argument#*=}" ;;
         --php=*)          PHP_VERSION="${argument#*=}" ;;
         --ns-domain=*)    PDNS_NS_DOMAIN="${argument#*=}" ;;
-        --mysql-password=*) MYSQL_PASSWORD="${argument#*=}"; MYSQL_PASSWORD_GIVEN=1 ;;
+        --port=*)         PANEL_PORT="${argument#*=}" ;;
         --local)          MODE="local" ;;
         --non-interactive) NON_INTERACTIVE=1 ;;
         -h|--help)        usage; exit 0 ;;
@@ -150,6 +150,9 @@ for argument in "$@"; do
 done
 
 NON_INTERACTIVE="${NON_INTERACTIVE:-0}"
+PANEL_PORT="${PANEL_PORT:-6669}"
+[[ "$PANEL_PORT" =~ ^[0-9]+$ && "$PANEL_PORT" -ge 1 && "$PANEL_PORT" -le 65535 ]] \
+    || fail "Invalid --port value: ${PANEL_PORT} (1-65535)."
 
 # Piped installs (curl | sudo bash) have no terminal — prompting would also
 # swallow the script itself, so never read stdin in that mode.
@@ -371,7 +374,7 @@ apt-get update -qq
 
 info "Installing base packages..."
 apt-get install -y -qq \
-    ca-certificates curl wget git unzip zip jq dnsutils lsb-release \
+    ca-certificates curl wget git unzip zip dnsutils lsb-release \
     apt-transport-https gnupg ufw openssl rsync mysql-client \
     software-properties-common
 
@@ -388,174 +391,6 @@ apt-get install -y -qq \
     "php${PHP_VERSION}-curl" "php${PHP_VERSION}-gd" "php${PHP_VERSION}-mbstring" \
     "php${PHP_VERSION}-xml" "php${PHP_VERSION}-zip" "php${PHP_VERSION}-intl" \
     "php${PHP_VERSION}-sqlite3"
-
-info "Installing MySQL server..."
-apt-get install -y -qq mysql-server
-
-# ---------------------------------------------------------------
-# MySQL root password + panel secrets (idempotent)
-#
-# Resolved immediately after MySQL is installed so an unknown password fails
-# in the first minute instead of after a full install.
-# ---------------------------------------------------------------
-
-info "Waiting for MySQL to accept connections..."
-MYSQL_SOCKET="/run/mysqld/mysqld.sock"
-for _ in $(seq 1 30); do
-    if [[ -S "$MYSQL_SOCKET" ]]; then
-        break
-    fi
-    sleep 1
-done
-if [[ ! -S "$MYSQL_SOCKET" ]]; then
-    fail "MySQL did not create ${MYSQL_SOCKET} — run 'systemctl status mysql' for the reason."
-fi
-
-SECRETS_FILE="/root/.panel-secrets"
-SECRETS_EXISTED=0
-MYSQL_FROM_SECRETS=""
-
-if [[ -f "$SECRETS_FILE" ]]; then
-    SECRETS_EXISTED=1
-    # shellcheck disable=SC1090
-    source "$SECRETS_FILE"
-    MYSQL_FROM_SECRETS="${MYSQL_ROOT_PASSWORD:-}"
-    if [[ -z "$MYSQL_FROM_SECRETS" ]]; then
-        fail "${SECRETS_FILE} does not define MYSQL_ROOT_PASSWORD."
-    fi
-fi
-
-# What we want the MySQL root password to be: the one passed on the command
-# line, else the one from a previous install, else a fresh random one.
-if [[ "$MYSQL_PASSWORD_GIVEN" == "1" ]]; then
-    MYSQL_ROOT_PASSWORD="$MYSQL_PASSWORD"
-elif [[ -n "$MYSQL_FROM_SECRETS" ]]; then
-    MYSQL_ROOT_PASSWORD="$MYSQL_FROM_SECRETS"
-else
-    MYSQL_ROOT_PASSWORD="$(openssl rand -hex 16)"
-fi
-
-PDNS_DB_PASSWORD="${PDNS_DB_PASSWORD:-$(openssl rand -hex 16)}"
-PDNS_API_KEY="${PDNS_API_KEY:-$(openssl rand -hex 24)}"
-
-write_secrets() {
-    # Subshell so umask 077 cannot leak into everything the installer
-    # creates afterwards (panel files must stay readable by www-data).
-    (
-        umask 077
-        cat > "$SECRETS_FILE" <<EOF
-# Generated by install-panel.sh — keep private (chmod 600).
-MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
-PDNS_DB_PASSWORD=${PDNS_DB_PASSWORD}
-PDNS_API_KEY=${PDNS_API_KEY}
-EOF
-        chmod 600 "$SECRETS_FILE"
-    )
-}
-
-if [[ ! -f "$SECRETS_FILE" ]] \
-    || ! grep -qxF "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}" "$SECRETS_FILE" \
-    || ! grep -qxF "PDNS_DB_PASSWORD=${PDNS_DB_PASSWORD}" "$SECRETS_FILE" \
-    || ! grep -qxF "PDNS_API_KEY=${PDNS_API_KEY}" "$SECRETS_FILE"; then
-    SECRETS_STALE=1
-else
-    SECRETS_STALE=0
-fi
-
-# auth_socket lets any *local root* connection in, so a socket SELECT 1 is a
-# false positive on a fresh server — only a TCP login proves the password.
-mysql_password_works() {
-    MYSQL_PWD="$1" mysql --protocol=TCP -h127.0.0.1 -uroot -e "SELECT 1;" >/dev/null 2>&1
-}
-
-# Can we open a session at all (socket, as this OS user) with this password?
-# An empty MYSQL_PWD is what a fresh auth_socket server accepts.
-mysql_session_works() {
-    MYSQL_PWD="$1" mysql --protocol=socket -uroot -e "SELECT 1;" >/dev/null 2>&1
-}
-
-# $1 = password that unlocks MySQL now, $2 = password to set.
-mysql_set_root_password() {
-    local __session="$1" __new="${2//\'/\'\'}"
-    MYSQL_PWD="$__session" mysql --protocol=socket -uroot <<SQL
-ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '${__new}';
-FLUSH PRIVILEGES;
-SQL
-}
-
-if mysql_password_works "$MYSQL_ROOT_PASSWORD"; then
-    ok "MySQL root password already configured (stored in ${SECRETS_FILE})."
-else
-    info "Setting MySQL root password..."
-
-    CURRENT_MYSQL_PASSWORD=""
-    MYSQL_UNLOCKED=0
-    CANDIDATES=()
-
-    # Secrets from an earlier run may hold the password MySQL actually has.
-    if [[ "$SECRETS_EXISTED" == "1" && -n "$MYSQL_FROM_SECRETS" && "$MYSQL_FROM_SECRETS" != "$MYSQL_ROOT_PASSWORD" ]]; then
-        CANDIDATES+=("$MYSQL_FROM_SECRETS")
-    fi
-    # A fresh server accepts a root session with no password (auth_socket).
-    CANDIDATES+=("")
-    # Debian's own maintenance account, when the package provides one.
-    DEBIAN_SYS_MAINT_PASSWORD=""
-    if [[ -r /etc/mysql/debian.cnf ]]; then
-        DEBIAN_SYS_MAINT_PASSWORD="$(awk '/^[[:space:]]*password[[:space:]]*=/{sub(/^[[:space:]]*password[[:space:]]*=[[:space:]]*/, ""); gsub(/[[:space:]]+$/, ""); print; exit}' /etc/mysql/debian.cnf)"
-    fi
-    if [[ -n "$DEBIAN_SYS_MAINT_PASSWORD" ]]; then
-        CANDIDATES+=("$DEBIAN_SYS_MAINT_PASSWORD")
-    fi
-
-    for candidate in "${CANDIDATES[@]}"; do
-        if mysql_session_works "$candidate"; then
-            CURRENT_MYSQL_PASSWORD="$candidate"
-            MYSQL_UNLOCKED=1
-            break
-        fi
-    done
-
-    # Interactive runs: ask for the password this installer does not know.
-    if [[ "$MYSQL_UNLOCKED" -eq 0 && "$NON_INTERACTIVE" != "1" ]]; then
-        prompt_secret MYSQL_ENTERED_PASSWORD "MySQL is already secured — enter its current root password"
-        if [[ -n "${MYSQL_ENTERED_PASSWORD:-}" ]] && mysql_session_works "$MYSQL_ENTERED_PASSWORD"; then
-            CURRENT_MYSQL_PASSWORD="$MYSQL_ENTERED_PASSWORD"
-            MYSQL_UNLOCKED=1
-        fi
-    fi
-
-    if [[ "$MYSQL_UNLOCKED" -eq 0 ]]; then
-        # Not fatal: everything else can still be installed. The password is
-        # collected on the setup page the panel shows afterwards.
-        MYSQL_PENDING=1
-        SETUP_STEPS+=(mysql)
-        warn "Cannot log in to MySQL as root — deferring this to the setup page.
-       MySQL is secured with a password this installer does not know (it was
-       set outside the panel). After the install, open the panel and enter
-       the current root password there (or re-run with --mysql-password=…)."
-    else
-        mysql_set_root_password "$CURRENT_MYSQL_PASSWORD" "$MYSQL_ROOT_PASSWORD" \
-            || fail "Could not set the MySQL root password."
-
-        if mysql_password_works "$MYSQL_ROOT_PASSWORD"; then
-            ok "MySQL root password set (stored in ${SECRETS_FILE})."
-        else
-            warn "MySQL accepted the new password on the socket, but it could not be verified over TCP (127.0.0.1:3306) — the panel's Databases module needs MySQL to listen on TCP."
-        fi
-    fi
-fi
-
-# Never record a password MySQL does not have: an unlocked-out run leaves it
-# empty until the setup page supplies the real one.
-if [[ "$MYSQL_PENDING" == "1" ]]; then
-    MYSQL_ROOT_PASSWORD=""
-fi
-
-# Written only once MySQL has accepted it — a failed run must not record a
-# password that MySQL does not have.
-if [[ "$SECRETS_STALE" == "1" ]]; then
-    write_secrets
-fi
 
 if ! command -v composer >/dev/null 2>&1; then
     info "Installing Composer..."
@@ -701,13 +536,11 @@ fi
 cd "$PANEL_DIR"
 
 # ---------------------------------------------------------------
-# PowerDNS (authoritative server + localhost HTTP API)
+# PowerDNS defaults (the server itself is installed from the panel)
 # ---------------------------------------------------------------
 
 PDNS_NS_DOMAIN="${PDNS_NS_DOMAIN:-${PANEL_DOMAIN}}"
 PDNS_API_URL="http://127.0.0.1:8081"
-# Zones are created on the collection endpoint; only reads/deletes take /zones/{id}.
-PDNS_ZONES_URL="${PDNS_API_URL}/api/v1/servers/localhost/zones"
 
 if [[ -z "${PDNS_SERVER_IP:-}" ]]; then
     PDNS_SERVER_IP="$(curl -fsS --max-time 5 -4 https://api.ipify.org 2>/dev/null || true)"
@@ -717,235 +550,6 @@ if [[ -z "${PDNS_SERVER_IP:-}" ]]; then
 fi
 PDNS_SERVER_IP="${PDNS_SERVER_IP:-}"
 [[ -n "$PDNS_SERVER_IP" ]] || warn "Could not detect the server IP — set PDNS_SERVER_IP in .env and re-run to seed zones."
-
-# systemd-resolved squats on 127.0.0.53:53 — free port 53 before pdns starts.
-if systemctl is-active --quiet systemd-resolved 2>/dev/null \
-    && grep -Eq '^#?DNSStubListener=' /etc/systemd/resolved.conf 2>/dev/null; then
-    info "Disabling the systemd-resolved stub listener (port 53 → PowerDNS)..."
-    sed -i 's/^#\?DNSStubListener=.*/DNSStubListener=no/' /etc/systemd/resolved.conf
-    rm -f /etc/resolv.conf
-    ln -s /run/systemd/resolve/resolv.conf /etc/resolv.conf
-    systemctl restart systemd-resolved >/dev/null 2>&1 || true
-fi
-
-info "Installing PowerDNS authoritative server..."
-apt-get install -y -qq pdns-server pdns-backend-mysql
-
-info "Configuring PowerDNS database..."
-if [[ "$MYSQL_PENDING" == "1" ]]; then
-    warn "Skipping the PowerDNS database — MySQL is still locked. It is created (and pdns restarted) from the setup page once you enter the MySQL root password."
-else
-    MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket -uroot <<SQL || fail "Could not configure the PowerDNS database."
-CREATE DATABASE IF NOT EXISTS pdns;
-CREATE USER IF NOT EXISTS 'pdns_user'@'localhost' IDENTIFIED BY '${PDNS_DB_PASSWORD}';
-ALTER USER 'pdns_user'@'localhost' IDENTIFIED BY '${PDNS_DB_PASSWORD}';
-GRANT ALL PRIVILEGES ON pdns.* TO 'pdns_user'@'localhost';
-FLUSH PRIVILEGES;
-SQL
-
-    MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket -uroot pdns <<'SQL' || fail "Could not create the PowerDNS schema (see the SQL error above)."
-CREATE TABLE IF NOT EXISTS domains (
-  id                    INT AUTO_INCREMENT,
-  name                  VARCHAR(255) NOT NULL,
-  master                VARCHAR(128) DEFAULT NULL,
-  last_check            INT DEFAULT NULL,
-  type                  VARCHAR(6) NOT NULL,
-  notified_serial       INT UNSIGNED DEFAULT NULL,
-  account               VARCHAR(40) CHARACTER SET 'utf8' DEFAULT NULL,
-  PRIMARY KEY (id),
-  UNIQUE KEY name_index (name)
-) Engine=InnoDB;
-
-CREATE TABLE IF NOT EXISTS records (
-  id                    BIGINT AUTO_INCREMENT,
-  domain_id             INT DEFAULT NULL,
-  name                  VARCHAR(255) DEFAULT NULL,
-  type                  VARCHAR(10) DEFAULT NULL,
-  content               TEXT DEFAULT NULL,
-  ttl                   INT DEFAULT 3600,
-  prio                  INT DEFAULT 0,
-  disabled              TINYINT(1) DEFAULT 0,
-  ordername             VARCHAR(255) BINARY DEFAULT NULL,
-  auth                  TINYINT(1) DEFAULT 1,
-  PRIMARY KEY (id),
-  KEY rec_name_time_index (name(255), type),
-  KEY domain_id (domain_id)
-) Engine=InnoDB;
-
-CREATE TABLE IF NOT EXISTS supermasters (
-  ip                    VARCHAR(64) NOT NULL,
-  nameserver            VARCHAR(255) NOT NULL,
-  account               VARCHAR(40) NOT NULL,
-  PRIMARY KEY (ip, nameserver)
-) Engine=InnoDB;
-
-CREATE TABLE IF NOT EXISTS comments (
-  id                    INT AUTO_INCREMENT,
-  domain_id             INT NOT NULL,
-  name                  VARCHAR(255) NOT NULL,
-  type                  VARCHAR(10) NOT NULL,
-  modified_at           INT NOT NULL,
-  account               VARCHAR(40) CHARACTER SET 'utf8' DEFAULT NULL,
-  comment               TEXT NOT NULL,
-  PRIMARY KEY (id),
-  KEY name_index (name(255), type),
-  KEY domain_id (domain_id)
-) Engine=InnoDB;
-
-CREATE TABLE IF NOT EXISTS domainmetadata (
-  id                    INT AUTO_INCREMENT,
-  domain_id             INT NOT NULL,
-  kind                  VARCHAR(32),
-  content               TEXT,
-  PRIMARY KEY (id),
-  KEY domainmetadata_idx (domain_id, kind)
-) Engine=InnoDB;
-
-CREATE TABLE IF NOT EXISTS cryptokeys (
-  id                    INT AUTO_INCREMENT,
-  domain_id             INT NOT NULL,
-  flags                 INT NOT NULL,
-  active                BOOL,
-  published             BOOL DEFAULT 1,
-  content               TEXT,
-  PRIMARY KEY (id),
-  KEY domainidindex (domain_id)
-) Engine=InnoDB;
-
-CREATE TABLE IF NOT EXISTS tsigkeys (
-  id                    INT AUTO_INCREMENT,
-  name                  VARCHAR(255),
-  algorithm             VARCHAR(50),
-  secret                VARCHAR(255),
-  PRIMARY KEY (id),
-  UNIQUE KEY name_algo_index (name, algorithm)
-) Engine=InnoDB;
-SQL
-fi
-
-# pdns.conf: write the full config on a fresh install, otherwise only make
-# sure the HTTP API block exists on top of whatever is already configured.
-if ! grep -Eq '^[[:space:]]*launch=' /etc/powerdns/pdns.conf 2>/dev/null; then
-    info "Writing PowerDNS configuration..."
-    cat > /etc/powerdns/pdns.conf <<EOF
-# PowerDNS — written by install-panel.sh (re-run to refresh).
-launch=gmysql
-gmysql-host=127.0.0.1
-gmysql-port=3306
-gmysql-user=pdns_user
-gmysql-password=${PDNS_DB_PASSWORD}
-gmysql-dbname=pdns
-
-local-address=0.0.0.0
-local-port=53
-master=yes
-daemon=yes
-guardian=yes
-
-# HTTP API — used by the panel (localhost only).
-webserver-address=127.0.0.1
-webserver-allow-from=127.0.0.1
-webserver-port=8081
-api=yes
-api-key=${PDNS_API_KEY}
-EOF
-    chmod 644 /etc/powerdns/pdns.conf
-elif ! grep -Eq '^[[:space:]]*api[[:space:]]*=' /etc/powerdns/pdns.conf; then
-    info "Enabling the PowerDNS HTTP API on the existing configuration..."
-    cat >> /etc/powerdns/pdns.conf <<EOF
-
-# HTTP API — appended by install-panel.sh.
-webserver-address=127.0.0.1
-webserver-allow-from=127.0.0.1
-webserver-port=8081
-api=yes
-api-key=${PDNS_API_KEY}
-EOF
-fi
-
-info "Starting PowerDNS..."
-systemctl enable pdns >/dev/null 2>&1 || true
-systemctl restart pdns || warn "PowerDNS did not restart cleanly — check 'systemctl status pdns'."
-
-PDNS_UP=0
-for _ in $(seq 1 30); do
-    if curl -fsS --max-time 2 -H "X-API-Key: ${PDNS_API_KEY}" \
-        "${PDNS_API_URL}/api/v1/servers/localhost" >/dev/null 2>&1; then
-        PDNS_UP=1
-        break
-    fi
-    sleep 1
-done
-
-if [[ "$PDNS_UP" == "1" ]]; then
-    ok "PowerDNS API is listening on 127.0.0.1:8081."
-else
-    warn "PowerDNS API did not answer — check 'systemctl status pdns' and 'journalctl -u pdns'."
-fi
-
-seed_pdns_zone() {
-    local zone="$1"
-    local zone_url="${PDNS_ZONES_URL}/${zone}."
-    local serial ns1 ns2 payload code detail
-
-    if curl -fsS --max-time 3 -H "X-API-Key: ${PDNS_API_KEY}" "$zone_url" >/dev/null 2>&1; then
-        ok "DNS zone ${zone} already exists."
-        return 0
-    fi
-
-    if [[ -z "$PDNS_SERVER_IP" ]]; then
-        warn "Skipping zone ${zone}: PDNS_SERVER_IP is empty."
-        return 0
-    fi
-
-    serial="$(date -u +%Y%m%d%H)"
-    ns1="ns1.${PDNS_NS_DOMAIN}."
-    ns2="ns2.${PDNS_NS_DOMAIN}."
-
-    payload="$(jq -n \
-        --arg zone "${zone}." \
-        --arg ip "${PDNS_SERVER_IP}" \
-        --arg ns1 "$ns1" \
-        --arg ns2 "$ns2" \
-        --arg soa "${ns1} admin.${PDNS_NS_DOMAIN}. ${serial} 10800 3600 604800 3600" \
-        --argjson glue "$([[ "$zone" == "$PDNS_NS_DOMAIN" ]] && echo true || echo false)" \
-        '{
-            name: $zone, kind: "Native", masters: [],
-            rrsets: (
-                [
-                    {name: $zone, type: "SOA", ttl: 86400, records: [{content: $soa, disabled: false}]},
-                    {name: $zone, type: "NS", ttl: 86400, records: [{content: $ns1, disabled: false}, {content: $ns2, disabled: false}]},
-                    {name: $zone, type: "A", ttl: 3600, records: [{content: $ip, disabled: false}]},
-                    {name: ("*." + $zone), type: "A", ttl: 3600, records: [{content: $ip, disabled: false}]}
-                ] + (if $glue then
-                    [
-                        {name: $ns1, type: "A", ttl: 3600, records: [{content: $ip, disabled: false}]},
-                        {name: $ns2, type: "A", ttl: 3600, records: [{content: $ip, disabled: false}]}
-                    ]
-                else [] end)
-            )
-        }')"
-
-    code="$(curl -sS --max-time 5 -o /tmp/pdns-seed.json -w '%{http_code}' \
-        -H "X-API-Key: ${PDNS_API_KEY}" -H 'Content-Type: application/json' \
-        -d "$payload" "$PDNS_ZONES_URL" || true)"
-    code="${code:-000}"
-
-    if [[ "$code" =~ ^(200|201|204)$ ]]; then
-        ok "Seeded DNS zone ${zone}."
-    else
-        detail="$(jq -r '.errors[0].message // .error // .message // empty' /tmp/pdns-seed.json 2>/dev/null || true)"
-        [[ -n "$detail" ]] || detail="$(head -c 200 /tmp/pdns-seed.json 2>/dev/null || true)"
-        warn "Could not seed zone ${zone} (HTTP ${code})${detail:+: ${detail}}"
-    fi
-}
-
-if [[ "$PDNS_UP" == "1" ]]; then
-    seed_pdns_zone "$PDNS_NS_DOMAIN"
-    if [[ -n "$PANEL_DOMAIN" && "$PANEL_DOMAIN" != "$PDNS_NS_DOMAIN" ]]; then
-        seed_pdns_zone "$PANEL_DOMAIN"
-    fi
-fi
 
 # ---------------------------------------------------------------
 # Laravel application
@@ -1018,9 +622,9 @@ MAIL_FROM_NAME="\${APP_NAME}"
 PANEL_DOMAIN=${PANEL_DOMAIN}
 PANEL_PHP=${PHP_VERSION}
 PANEL_UPDATE_BRANCH=${BRANCH}
-MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+MYSQL_ROOT_PASSWORD=
 PDNS_API_URL=${PDNS_API_URL}
-PDNS_API_KEY=${PDNS_API_KEY}
+PDNS_API_KEY=
 PDNS_NS_DOMAIN=${PDNS_NS_DOMAIN}
 PDNS_SERVER_IP=${PDNS_SERVER_IP}
 EOF
@@ -1074,7 +678,10 @@ else
 fi
 
 # Store the panel login next to the other secrets so a re-run (or a lost
-# terminal scrollback) can always recover it.
+# terminal scrollback) can always recover it. The MySQL and PowerDNS commands
+# append their own keys to the same file.
+SECRETS_FILE="/root/.panel-secrets"
+
 upsert_secret() {
     local key="$1" value="$2" tmp
     tmp="$(mktemp)"
@@ -1152,6 +759,15 @@ ${PANEL_DOMAIN} {
     php_fastcgi unix//run/php/php${PHP_VERSION}-fpm.sock
     file_server
 }
+
+# Plain HTTP on any host at PANEL_PORT: works before DNS resolves, without a
+# certificate, and without taking 80 away from anything else.
+:${PANEL_PORT} {
+    root * ${PANEL_DIR}/public
+    encode zstd gzip
+    php_fastcgi unix//run/php/php${PHP_VERSION}-fpm.sock
+    file_server
+}
 EOF
 
 # Reachable before DNS for PANEL_DOMAIN resolves: a nip.io hostname that
@@ -1174,9 +790,9 @@ http://${PDNS_SERVER_IP} {
     file_server
 }
 EOF
-    ok "Panel also served at https://panel.${PDNS_SERVER_IP}.nip.io and http://${PDNS_SERVER_IP}."
+    ok "Panel also served at https://panel.${PDNS_SERVER_IP}.nip.io, http://${PDNS_SERVER_IP} and http://${PDNS_SERVER_IP}:${PANEL_PORT}."
 else
-    warn "Server IP unknown — only ${PANEL_DOMAIN} was configured in Caddy."
+    warn "Server IP unknown — only ${PANEL_DOMAIN} and port ${PANEL_PORT} were configured in Caddy."
 fi
 
 chmod 644 "/etc/caddy/sites/panel.caddy"
@@ -1219,9 +835,7 @@ fi
 
 info "Enabling services..."
 systemctl enable --now "php${PHP_VERSION}-fpm" >/dev/null 2>&1 || true
-systemctl enable --now mysql >/dev/null 2>&1 || true
 systemctl enable --now caddy >/dev/null 2>&1 || true
-systemctl enable --now pdns >/dev/null 2>&1 || true
 systemctl restart "php${PHP_VERSION}-fpm" caddy \
     || warn "php${PHP_VERSION}-fpm / caddy did not restart cleanly — check their systemctl status."
 
@@ -1234,12 +848,13 @@ ufw allow 80/tcp  comment 'HTTP'  >/dev/null 2>&1 || true
 ufw allow 443/tcp comment 'HTTPS' >/dev/null 2>&1 || true
 ufw allow 53/tcp  comment 'DNS'   >/dev/null 2>&1 || true
 ufw allow 53/udp  comment 'DNS'   >/dev/null 2>&1 || true
+ufw allow "${PANEL_PORT}/tcp" comment 'Panel' >/dev/null 2>&1 || true
 
 if ufw status | grep -q 'Status: inactive'; then
     ufw --force enable >/dev/null \
         || warn "UFW could not be enabled — open 80/443 yourself if the panel is unreachable."
 fi
-ok "Firewall allows SSH (${SSH_PORT}), 80, 443 and DNS (53)."
+ok "Firewall allows SSH (${SSH_PORT}), 80, 443, DNS (53) and the panel port (${PANEL_PORT})."
 
 # ---------------------------------------------------------------
 # Summary
@@ -1269,10 +884,10 @@ echo
 echo "  Next steps:"
 echo "  1. Open the panel right now — these work before DNS points here:"
 if [[ -n "${PDNS_SERVER_IP:-}" ]]; then
+    echo "       http://${PDNS_SERVER_IP}:${PANEL_PORT}      (plain HTTP — ready to use)"
     echo "       https://panel.${PDNS_SERVER_IP}.nip.io  (trusted certificate)"
-    echo "       http://${PDNS_SERVER_IP}                (plain HTTP — setup only)"
 else
-    echo "       (server IP unknown — point DNS first)"
+    echo "       http://SERVER_IP:${PANEL_PORT}         (once the IP is known)"
 fi
 echo "  2. Point DNS: ${PANEL_DOMAIN} → this server's public IP"
 echo "     (Caddy issues the certificate automatically once DNS resolves)"
@@ -1281,9 +896,10 @@ if [[ -n "$ADMIN_EMAIL" ]]; then
 else
     echo "  3. Finish setup in the browser (the panel asks for it first)"
 fi
-echo "  4. For the DNS module: register ns1.${PDNS_NS_DOMAIN} / ns2.${PDNS_NS_DOMAIN}"
-echo "     with your registrar, pointing both at ${PDNS_SERVER_IP:-unknown}"
-echo "  5. Install other modules (Sites, Email, phpMyAdmin) from the panel"
+echo "  4. Add the rest from the panel whenever you need it:"
+echo "       Databases → installs MySQL (it generates and stores the root password)"
+echo "       DNS       → installs PowerDNS, then register ns1./ns2.${PDNS_NS_DOMAIN}"
+echo "       Email     → installs the mail server · Sites and phpMyAdmin are one click"
 echo
 echo "  Re-run this script any time to update the panel."
 echo
@@ -1294,7 +910,7 @@ if ((${#SETUP_STEPS[@]})); then
     echo "  Open the panel and the setup page collects what is missing"
     echo "  (${SETUP_STEPS[*]}) — nothing else has to be installed:"
     if [[ -n "${PDNS_SERVER_IP:-}" ]]; then
-        echo "       http://${PDNS_SERVER_IP}                  (plain HTTP — setup)"
+        echo "       http://${PDNS_SERVER_IP}:${PANEL_PORT}         (plain HTTP — setup)"
         echo "       https://panel.${PDNS_SERVER_IP}.nip.io    (trusted certificate)"
     fi
     echo "       https://${PANEL_DOMAIN}"
@@ -1306,6 +922,9 @@ echo "              PANEL IS LIVE — SAVE THESE"
 echo "============================================================"
 echo "  Login URL:  https://${PANEL_DOMAIN}/login"
 echo "  Panel URL:  https://${PANEL_DOMAIN}"
+if [[ -n "${PDNS_SERVER_IP:-}" ]]; then
+    echo "              http://${PDNS_SERVER_IP}:${PANEL_PORT}  (no DNS needed)"
+fi
 if [[ -n "$ADMIN_EMAIL" ]]; then
     echo "  Email:      ${ADMIN_EMAIL}"
     echo "  Password:   ${ADMIN_PASSWORD}"

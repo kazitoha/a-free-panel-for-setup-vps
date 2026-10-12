@@ -14,14 +14,44 @@
         </div>
     </div>
 
-    @if ($listError)
+    @if ($needsInstall)
+        <div class="card mb-6 p-5">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <p class="eyebrow">mysql not reachable</p>
+                    <p class="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
+                        The panel cannot talk to MySQL on this server, so databases cannot be created yet.
+                        Installing sets up the server, sets a root password it generates itself and stores
+                        it in <span class="font-mono">.env</span> and
+                        <span class="font-mono">/root/.panel-secrets</span>.
+                    </p>
+                </div>
+                @if ($active)
+                    <a href="{{ route('installs.show', $active) }}" class="btn-primary">Watch install ↗</a>
+                @else
+                    <form method="POST" action="{{ route('databases.install') }}"
+                          onsubmit="return confirm('Install MySQL now?');">
+                        @csrf
+                        <button type="submit" class="btn-primary">⬇ Install MySQL</button>
+                    </form>
+                @endif
+            </div>
+
+            @if ($latest && $latest->status === 'failed')
+                <div class="mt-4 rounded-md border border-rose-900/60 bg-rose-950/30 p-3">
+                    <p class="text-xs text-rose-300">Last attempt failed:</p>
+                    <p class="mt-1 font-mono text-[11px] text-rose-400/80">{{ $latest->message }}</p>
+                </div>
+            @endif
+        </div>
+    @elseif ($listError)
         <div class="mb-6 rounded-md border border-amber-900/60 bg-amber-950/30 p-3">
             <p class="text-xs text-amber-300">{{ $listError }}</p>
         </div>
     @endif
 
     {{-- Create --}}
-    <form method="POST" action="{{ route('databases.store') }}" class="card p-5">
+    <form method="POST" action="{{ route('databases.store') }}" class="card p-5" @if ($needsInstall) hidden @endif>
         @csrf
         <p class="eyebrow">new database</p>
 

@@ -12,9 +12,9 @@ A self-hosted control panel for Ubuntu VPS servers. Manage Caddy sites, phpMyAdm
 | **Sites (Caddy)** | Add/edit/remove sites, PHP version, wildcard SSL, on-demand TLS, validate + auto-rollback |
 | **phpMyAdmin** | One-click install + `pma.<panel-domain>` subdomain |
 | **PHP versions** | Shows installed versions, and installs/removes any 8.x in one click (ondrej PPA) — pick them in Sites and Projects |
-| **DNS (PowerDNS)** | Zone + record CRUD via the PowerDNS HTTP API, protected NS/panel zones, batch customer-domain import, service restart |
+| **DNS (PowerDNS)** | One-click PowerDNS install, then zone + record CRUD via the PowerDNS HTTP API, protected NS/panel zones, batch customer-domain import, service restart |
 | **Email (Stalwart)** | Install wizard, mail domain + mailbox create/reset/delete, MX/SPF/DMARC/DKIM auto-records |
-| **Databases** | MySQL database/user create, drop, grant, password reset |
+| **Databases** | One-click MySQL install (generates and stores the root password), then database/user create, drop, grant, password reset |
 | **Projects** | GitHub repo → clone, Caddy, Composer, Laravel deploy (just give a domain + PHP version) |
 | **Logs** | journalctl viewer, Caddyfile editor (validate + rollback) |
 | **Backups** | Per-database `.sql.gz` dumps + per-project `.tar.gz` archives, verified, retention-pruned, schedules (1–24 runs/day) |
@@ -23,7 +23,7 @@ A self-hosted control panel for Ubuntu VPS servers. Manage Caddy sites, phpMyAdm
 
 ## How to run — on a fresh Ubuntu VPS (22.04 / 24.04)
 
-First, point an A record at the VPS: `panel.example.com → VPS_IP`. It also works without one — the installer writes two more addresses: `https://panel.<VPS_IP>.nip.io` (a real certificate, no DNS setup required) and `http://<VPS_IP>` (for the initial setup only). As soon as you add the A record, the main domain serves over HTTPS; that is the canonical URL. Then SSH into the VPS and run a single command — the panel download, full setup and admin login credentials are all handled at once:
+First, point an A record at the VPS: `panel.example.com → VPS_IP`. It also works without one — the installer serves the panel right away on `http://<VPS_IP>:6669` (change the port with `--port=PORT`) plus `https://panel.<VPS_IP>.nip.io` (a real certificate, no DNS setup required), so you can log in before any DNS resolves. As soon as you add the A record, the main domain serves over HTTPS; that is the canonical URL. Then SSH into the VPS and run a single command — the panel download, full setup and admin login credentials are all handled at once:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kazitoha/a-free-panel-for-setup-vps/main/install-panel.sh \
@@ -41,8 +41,8 @@ curl -fsSL https://raw.githubusercontent.com/kazitoha/a-free-panel-for-setup-vps
 - If a panel already exists in `/var/www/panel`, the installer asks what to do — **update** (default: keep it and fast-forward), **overwrite** (delete the whole project and reinstall; the `.env` and database are backed up to `/root/panel-backups/overwrite-<time>` first), **skip** (leave the code as it is). For the last two, pass `--code=overwrite` / `--code=skip` in piped mode
 - `--repo` must be a full URL (`https://github.com/…`, `git@host:path`, or a local path). If you pass the `owner/repo` shorthand, the installer stops early and shows the exact form to use (e.g. `--repo=https://github.com/owner/repo`)
 - Admin credentials can be retrieved later: `/root/.panel-secrets` contains `PANEL_ADMIN_EMAIL` / `PANEL_ADMIN_PASSWORD` (chmod 600)
-- MySQL root password: on a fresh server a random one is generated and set for you. If MySQL is already secured (for example by an earlier setup script), the installer unlocks it via `/root/.panel-secrets`, Debian's `/etc/mysql/debian.cnf`, an interactive prompt, or `--mysql-password='<current mysql root password>'` (which also becomes the stored root password). If none of them work, the install still finishes — see the setup page below
-- When the installer cannot set something itself (an unknown MySQL root password, or no `--email`), it records a marker in `storage/app/setup-pending.json` and the panel opens `/first-run` instead of the login page on the first visit. That page asks only for what is missing — the MySQL root password and/or the administrator email + password — applies it through the privileged runner and then hands over to `/login`. Everything else is already installed at that point, and no second setup run can be started from the web side
+- MySQL and PowerDNS are **not** installed by the script — add them from the panel when you need them (Databases and DNS each have a one-click Install). The installer only sets up the core: PHP-FPM, Composer, Caddy, the panel code, migrations, the admin account, the sudo runner and the firewall
+- When no `--email` / `--password` was given, the installer records a marker in `storage/app/setup-pending.json` and the panel opens `/first-run` instead of the login page on the first visit. That page creates the administrator account through the privileged runner and then hands over to `/login`. Everything else is already installed at that point, and no second setup run can be started from the web side
 
 Alternative: download the script and run it (interactive wizard):
 
@@ -54,7 +54,7 @@ sudo bash /tmp/install-panel.sh
 
 The wizard asks three things: panel domain, admin email, admin password (blank = auto generate). If a panel already exists, a fourth question appears: update / overwrite / skip.
 
-What the installer sets up: PHP-FPM + extensions · MySQL · Composer · Caddy · PowerDNS (HTTP API + zone seed) · Node/assets · panel code (clone) · migrations · admin account · HTTPS site · sudo runner · UFW. Re-running it is safe (idempotent) — it asks what already exists and updates the code by default.
+What the installer sets up: PHP-FPM + extensions · Composer · Caddy (+ the `SERVER_IP:6669` panel listener) · Node/assets · panel code (clone) · migrations · admin account · HTTPS site · sudo runner · UFW. MySQL, PowerDNS and the mail server are installed from their panel pages when you need them. Re-running it is safe (idempotent) — it asks what already exists and updates the code by default.
 
 ```bash
 # You can also run it from a local file with all options
@@ -70,8 +70,8 @@ sudo bash install-panel.sh \
 After installing:
 
 1. Sign in at `https://panel.example.com`
-2. Install the remaining modules from the Dashboard
-3. The panel's `.env` and passwords (MySQL root, PowerDNS API key, panel admin login) live in `/root/.panel-secrets` (chmod 600)
+2. Install the remaining modules from their pages — Databases (MySQL), DNS (PowerDNS), Email
+3. The panel's `.env` and passwords (admin login first, then the MySQL root password and PowerDNS API key as those modules are installed) live in `/root/.panel-secrets` (chmod 600)
 4. To run the DNS module, point both ns1/ns2 at `${PDNS_SERVER_IP}` at your registrar
 
 ## Backups and cron

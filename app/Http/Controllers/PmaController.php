@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Install;
-use App\Services\InstallRunner;
+use App\Services\InstallStarter;
 use App\Services\SudoRunner;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -13,7 +13,7 @@ use RuntimeException;
 class PmaController extends Controller
 {
     public function __construct(
-        private readonly InstallRunner $runner,
+        private readonly InstallStarter $starter,
         private readonly SudoRunner $sudo,
     ) {}
 
@@ -36,37 +36,10 @@ class PmaController extends Controller
 
     public function install(Request $request): RedirectResponse
     {
-        $active = Install::ofType('pma')
-            ->whereIn('status', [Install::STATUS_PENDING, Install::STATUS_RUNNING])
-            ->exists();
-
-        if ($active) {
-            return redirect()->route('installs.show', Install::ofType('pma')->latest('id')->firstOrFail());
-        }
-
-        $install = Install::create([
-            'type' => 'pma',
-            'label' => 'Install phpMyAdmin',
-            'command' => 'panel:pma:install',
-            'status' => Install::STATUS_PENDING,
-        ]);
-
         try {
-            $this->runner->start($install);
+            $install = $this->starter->start('pma', 'Install phpMyAdmin', 'panel:pma:install');
         } catch (RuntimeException $exception) {
-            $install->forceFill([
-                'status' => Install::STATUS_FAILED,
-                'message' => mb_substr($exception->getMessage(), 0, 500),
-                'finished_at' => now(),
-            ])->save();
-
-            $message = $exception->getMessage();
-
-            if (str_contains($message, 'sudo')) {
-                $message = SudoRunner::denialMessage();
-            }
-
-            return back()->with('error', $message);
+            return back()->with('error', InstallStarter::failureMessage($exception));
         }
 
         return redirect()->route('installs.show', $install);

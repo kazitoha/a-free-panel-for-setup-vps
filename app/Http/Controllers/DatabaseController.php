@@ -4,15 +4,21 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\InvalidDatabase;
 use App\Models\Database;
+use App\Models\Install;
+use App\Services\InstallStarter;
 use App\Services\SudoRunner;
 use App\Support\DatabaseSpec;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use RuntimeException;
 
 class DatabaseController extends Controller
 {
-    public function __construct(private readonly SudoRunner $sudo) {}
+    public function __construct(
+        private readonly SudoRunner $sudo,
+        private readonly InstallStarter $starter,
+    ) {}
 
     public function index(): View
     {
@@ -32,12 +38,31 @@ class DatabaseController extends Controller
             ];
         });
 
+        $latest = Install::ofType('mysql')->latest('id')->first();
+
         return view('databases.index', [
             'rows' => $rows,
             'listError' => $live === null
                 ? 'Could not reach MySQL for live sizes — server details below are from the panel record.'
                 : null,
+            'needsInstall' => $live === null,
+            'active' => $latest?->isActive() ? $latest : null,
+            'latest' => $latest,
         ]);
+    }
+
+    /**
+     * Install (or unlock) MySQL: the Databases module's own first step.
+     */
+    public function install(): RedirectResponse
+    {
+        try {
+            $install = $this->starter->start('mysql', 'Install MySQL', 'panel:mysql:install');
+        } catch (RuntimeException $exception) {
+            return back()->with('error', InstallStarter::failureMessage($exception));
+        }
+
+        return redirect()->route('installs.show', $install);
     }
 
     public function store(Request $request): RedirectResponse

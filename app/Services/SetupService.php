@@ -16,6 +16,7 @@ class SetupService
     public function __construct(
         private readonly PowerDnsClient $pdns,
         private readonly MailService $mail,
+        private readonly SudoRunner $sudo,
     ) {}
 
     /**
@@ -60,6 +61,7 @@ class SetupService
             $this->panelItem(),
             $this->phpItem($installed, $running),
             $this->caddyItem($domain),
+            $this->mysqlItem(),
             $this->powerDnsItem($zones),
             $this->zoneItem($zones, $domain),
             $this->phpMyAdminItem($domain),
@@ -166,6 +168,13 @@ class SetupService
             ];
         }
 
+        if (preg_match('/^:([0-9]{1,5})\s*\{/m', $snippet, $port) === 1) {
+            $urls[] = [
+                'url' => 'http://'.$serverIp.':'.$port[1],
+                'note' => "Plain HTTP on port {$port[1]} — works before DNS resolves at all.",
+            ];
+        }
+
         return $urls;
     }
 
@@ -248,6 +257,54 @@ class SetupService
     }
 
     /**
+     * MySQL is installed from the Databases module, so the checklist reports
+     * whether the panel can actually reach it and offers the install (or the
+     * repair) when it cannot.
+     *
+     * @return array{key: string, label: string, status: 'ok'|'pending'|'fail', detail: string, optional: bool, action: array{label: string, url: string, method: 'GET'|'POST'|'external'}|null}
+     */
+    private function mysqlItem(): array
+    {
+        if ($this->mysqlReachable()) {
+            return $this->item(
+                'mysql',
+                'MySQL',
+                'ok',
+                'Answering on 127.0.0.1:3306 — databases and users can be created.',
+                false,
+                ['label' => 'Open Databases', 'url' => route('databases.index'), 'method' => 'GET'],
+            );
+        }
+
+        $installed = is_file('/usr/sbin/mysqld');
+
+        return $this->item(
+            'mysql',
+            'MySQL',
+            $installed ? 'fail' : 'pending',
+            $installed
+                ? 'MySQL is installed, but the panel cannot reach it — the install repairs the root password.'
+                : 'Not installed, and the panel cannot reach it — the Databases module installs it on demand.',
+            false,
+            ['label' => $installed ? 'Repair MySQL' : 'Install MySQL', 'url' => route('databases.install'), 'method' => 'POST'],
+        );
+    }
+
+    /**
+     * The live database list is the same check the Databases page makes:
+     * only a successful run proves the server answers with the stored root
+     * password.
+     */
+    private function mysqlReachable(): bool
+    {
+        try {
+            return $this->sudo->run(['panel:database:list'], 60.0)['exit'] === 0;
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
      * @param  list<array<string, mixed>>|null  $zones
      * @return array{key: string, label: string, status: 'ok'|'pending'|'fail', detail: string, optional: bool, action: array{label: string, url: string, method: 'GET'|'POST'|'external'}|null}
      */
@@ -256,12 +313,14 @@ class SetupService
         return $this->item(
             'powerdns',
             'PowerDNS',
-            $zones === null ? 'fail' : 'ok',
+            $zones === null ? 'pending' : 'ok',
             $zones === null
-                ? 'The API at 127.0.0.1:8081 did not answer — check systemctl status pdns.'
+                ? 'The API at 127.0.0.1:8081 did not answer — install the server from here, or check systemctl status pdns.'
                 : 'API reachable on 127.0.0.1:8081 · '.count($zones).' zone(s) loaded.',
             false,
-            ['label' => 'Open DNS module', 'url' => route('dns.index'), 'method' => 'GET'],
+            $zones === null
+                ? ['label' => 'Install PowerDNS', 'url' => route('dns.install'), 'method' => 'POST']
+                : ['label' => 'Open DNS module', 'url' => route('dns.index'), 'method' => 'GET'],
         );
     }
 

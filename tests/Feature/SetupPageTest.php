@@ -3,9 +3,11 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Support\HostCommand;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 class SetupPageTest extends TestCase
@@ -101,6 +103,56 @@ class SetupPageTest extends TestCase
             ->assertSee('Install phpMyAdmin')
             ->assertSee('optional')
             ->assertSee('Open Email module');
+    }
+
+    public function test_setup_page_offers_installing_mysql_when_the_server_is_unreachable(): void
+    {
+        $this->partialMock(HostCommand::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('run')
+                ->withArgs(fn (array $command): bool => in_array('panel:database:list', $command, true))
+                ->andReturn(['exit' => 1, 'stdout' => '', 'stderr' => 'ERROR 2002']);
+        });
+
+        $this->actingAs(User::factory()->create())
+            ->get(route('setup.index'))
+            ->assertOk()
+            ->assertSee('the panel cannot reach it')
+            ->assertSee(route('databases.install'), false);
+    }
+
+    public function test_setup_page_reports_a_working_mysql(): void
+    {
+        $this->partialMock(HostCommand::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('run')
+                ->withArgs(fn (array $command): bool => in_array('panel:database:list', $command, true))
+                ->andReturn(['exit' => 0, 'stdout' => '[]', 'stderr' => '']);
+        });
+
+        $this->actingAs(User::factory()->create())
+            ->get(route('setup.index'))
+            ->assertOk()
+            ->assertSee('Answering on 127.0.0.1:3306')
+            ->assertSee('Open Databases');
+    }
+
+    public function test_setup_page_offers_installing_powerdns_when_the_api_is_down(): void
+    {
+        Http::fake([
+            self::PDNS.'/zones*' => fn () => throw new ConnectionException('refused'),
+            self::JMAP.'/*' => fn () => throw new ConnectionException('refused'),
+        ]);
+
+        $this->partialMock(HostCommand::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('run')
+                ->withArgs(fn (array $command): bool => in_array('panel:database:list', $command, true))
+                ->andReturn(['exit' => 0, 'stdout' => '[]', 'stderr' => '']);
+        });
+
+        $this->actingAs(User::factory()->create())
+            ->get(route('setup.index'))
+            ->assertOk()
+            ->assertSee('Install PowerDNS')
+            ->assertSee(route('dns.install'), false);
     }
 
     public function test_setup_page_reports_a_missing_caddy_site(): void

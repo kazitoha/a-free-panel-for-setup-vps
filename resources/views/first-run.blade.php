@@ -18,8 +18,9 @@
             <p class="eyebrow">first run</p>
             <h1 class="mt-1 mb-2 text-xl font-semibold tracking-tight text-white">Finish installing the panel</h1>
             <p class="mb-6 text-sm leading-relaxed text-slate-400">
-                Everything else — packages, PHP, Caddy, PowerDNS and the panel code — is already installed
-                and was skipped. Set the credentials below once, then sign in.
+                Packages, PHP, Caddy and the panel code are already installed. Create the administrator
+                account below, then sign in — MySQL, DNS and the mail server are added from the modules
+                afterwards, whenever you need them.
             </p>
 
             @include('partials.flash')
@@ -27,34 +28,39 @@
             <form method="POST" action="{{ route('firstrun.store') }}" class="space-y-4">
                 @csrf
 
-                @if ($needsMysql)
-                    <div>
-                        <label for="mysql_password" class="label">MySQL root password</label>
-                        <input id="mysql_password" name="mysql_password" type="password" required
-                               autocomplete="off" autofocus
-                               class="input @error('mysql_password') border-rose-500/60 @enderror"
-                               placeholder="••••••••">
-                        @error('mysql_password')
-                            <p class="field-error">{{ $message }}</p>
-                        @enderror
-                        <p class="mt-2 text-xs leading-relaxed text-slate-500">
-                            The password MySQL already has on this server. On a fresh server, type the password
-                            you want it to use — the installer stores it in <span class="font-mono">.env</span>
-                            and <span class="font-mono">/root/.panel-secrets</span>.
-                        </p>
-                    </div>
-                @endif
+                <div>
+                    <label for="email" class="label">Administrator email</label>
+                    <input id="email" name="email" type="email" value="{{ old('email') }}" required
+                           class="input @error('email') border-rose-500/60 @enderror"
+                           placeholder="you@example.com">
+                    @error('email')
+                        <p class="field-error">{{ $message }}</p>
+                    @enderror
+                </div>
 
-                @if ($needsAdmin)
-                    <div>
-                        <label for="email" class="label">Administrator email</label>
-                        <input id="email" name="email" type="email" value="{{ old('email') }}" required
-                               class="input @error('email') border-rose-500/60 @enderror"
-                               placeholder="you@example.com">
-                        @error('email')
-                            <p class="field-error">{{ $message }}</p>
-                        @enderror
-                    </div>
+                <div>
+                    <label for="password" class="label">Administrator password</label>
+                    <input id="password" name="password" type="password" required
+                           class="input @error('password') border-rose-500/60 @enderror"
+                           placeholder="at least 8 characters">
+                    @error('password')
+                        <p class="field-error">{{ $message }}</p>
+                    @enderror
+                </div>
+
+                <div>
+                    <label for="password_confirmation" class="label">Confirm password</label>
+                    <input id="password_confirmation" name="password_confirmation" type="password" required
+                           class="input @error('password_confirmation') border-rose-500/60 @enderror"
+                           placeholder="••••••••">
+                    @error('password_confirmation')
+                        <p class="field-error">{{ $message }}</p>
+                    @enderror
+                </div>
+
+                <button type="submit" class="btn-primary w-full justify-center">Complete setup</button>
+            </form>
+        </div>
 
                     <div>
                         <label for="password" class="label">Administrator password</label>
@@ -75,12 +81,6 @@
                             <p class="field-error">{{ $message }}</p>
                         @enderror
                     </div>
-                @else
-                    <p class="rounded-lg border border-slate-700/60 bg-slate-900/40 px-4 py-3 text-sm text-slate-400">
-                        The administrator account already exists — you will sign in with it below.
-                    </p>
-                @endif
-
                 <button type="submit" class="btn-primary w-full justify-center">Complete setup</button>
             </form>
         </div>
