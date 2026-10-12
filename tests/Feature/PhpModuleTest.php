@@ -260,4 +260,112 @@ class PhpModuleTest extends TestCase
 
         $this->assertSame(Install::STATUS_FAILED, $install->fresh()->status);
     }
+
+    public function test_the_install_command_refreshes_lists_and_installs_the_version(): void
+    {
+        $state = ['commands' => []];
+
+        $this->mockHost($state, fn (array $command): array => ['exit' => 0, 'stdout' => '', 'stderr' => '']);
+
+        $install = $this->pendingInstall();
+
+        $this->artisan('panel:php:install', ['id' => $install->id, '--php' => '8.4'])
+            ->assertSuccessful();
+
+        $this->assertContains(['apt-get', 'update', '-qq'], $state['commands']);
+        $this->assertContains(
+            ['apt-get', 'install', '-y', '--no-install-recommends', 'php8.4-fpm', 'php8.4-cli', 'php8.4-mysql', 'php8.4-curl', 'php8.4-gd', 'php8.4-mbstring', 'php8.4-xml', 'php8.4-zip', 'php8.4-intl', 'php8.4-sqlite3'],
+            $state['commands'],
+        );
+        $this->assertContains(['systemctl', 'enable', '--now', 'php8.4-fpm'], $state['commands']);
+        $this->assertNotContains(['add-apt-repository', '-y', 'ppa:ondrej/php'], $state['commands']);
+        $this->assertSame(Install::STATUS_SUCCESS, $install->fresh()->status);
+    }
+
+    public function test_the_install_command_adds_the_ondrej_repository_when_the_package_is_missing(): void
+    {
+        $state = ['commands' => []];
+        $checks = 0;
+
+        $this->mockHost($state, function (array $command) use (&$checks): array {
+            if (($command[0] ?? '') === 'apt-cache') {
+                $checks++;
+
+                return ['exit' => $checks === 1 ? 1 : 0, 'stdout' => '', 'stderr' => ''];
+            }
+
+            return ['exit' => 0, 'stdout' => '', 'stderr' => ''];
+        });
+
+        $install = $this->pendingInstall();
+
+        $this->artisan('panel:php:install', ['id' => $install->id, '--php' => '8.4'])
+            ->assertSuccessful();
+
+        $this->assertContains(['add-apt-repository', '-y', 'ppa:ondrej/php'], $state['commands']);
+        $this->assertContains(['apt-get', 'update', '-qq'], $state['commands']);
+        $this->assertSame(Install::STATUS_SUCCESS, $install->fresh()->status);
+    }
+
+    public function test_the_install_command_surfaces_the_real_apt_error(): void
+    {
+        $state = ['commands' => []];
+
+        $this->mockHost($state, function (array $command): array {
+            if (($command[0] ?? '') === 'apt-get' && ($command[1] ?? '') === 'install') {
+                return [
+                    'exit' => 100,
+                    'stdout' => "Reading package lists...\n",
+                    'stderr' => "No apport report written because MaxReports is reached already\n"
+                        ."No apport report written because MaxReports is reached already\n"
+                        ."dpkg: error processing package php8.4-fpm (--configure):\n"
+                        ." installed php8.4-fpm package post-installation script subprocess returned error exit status 1\n"
+                        ."E: Sub-process /usr/bin/dpkg returned an error code (1)\n",
+                ];
+            }
+
+            return ['exit' => 0, 'stdout' => '', 'stderr' => ''];
+        });
+
+        $install = $this->pendingInstall();
+
+        $this->artisan('panel:php:install', ['id' => $install->id, '--php' => '8.4'])
+            ->expectsOutputToContain('post-installation script subprocess returned error exit status 1')
+            ->assertFailed();
+
+        $message = (string) $install->fresh()->message;
+
+        $this->assertStringContainsString('E: Sub-process /usr/bin/dpkg returned an error code (1)', $message);
+        $this->assertStringNotContainsString('No apport report written', $message);
+    }
+
+    private function pendingInstall(): Install
+    {
+        return Install::create([
+            'type' => 'php',
+            'label' => 'Install PHP 8.4',
+            'command' => 'panel:php:install --php=8.4',
+            'status' => Install::STATUS_PENDING,
+        ]);
+    }
+
+    /**
+     * Swap HostCommand for a fake that records every command and lets the
+     * test decide each result.
+     *
+     * @param  array{commands: list<list<string>>}  $state
+     * @param  callable(list<string>, array<string, string>|null): array{exit: int, stdout: string, stderr: string}  $answer
+     */
+    private function mockHost(array &$state, callable $answer): void
+    {
+        $this->partialMock(HostCommand::class, function (MockInterface $mock) use (&$state, $answer): void {
+            $mock->shouldReceive('run')->andReturnUsing(
+                function (array $command, float $timeout = 60.0, ?array $env = null) use (&$state, $answer): array {
+                    $state['commands'][] = array_values(array_map('strval', $command));
+
+                    return $answer($command, $env);
+                },
+            );
+        });
+    }
 }
