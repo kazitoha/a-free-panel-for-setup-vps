@@ -42,7 +42,6 @@ Route::middleware('guest')->group(function () {
 Route::middleware('setup.pending')->group(function () {
     Route::get('/first-run', [FirstRunController::class, 'show'])->name('firstrun.index');
     Route::post('/first-run', [FirstRunController::class, 'store'])
-        ->middleware('throttle:5,1')
         ->name('firstrun.store');
 });
 
