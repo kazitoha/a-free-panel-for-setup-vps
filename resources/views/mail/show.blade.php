@@ -13,7 +13,7 @@
                 @endunless
             </h1>
             <div class="mt-2 flex flex-wrap items-center gap-2">
-                <span class="mono-chip">MX → mail.{{ $domain['name'] }}</span>
+                <span class="mono-chip">MX → {{ $hostname }}</span>
                 <span class="mono-chip">{{ count($mailboxes) }} mailboxes</span>
             </div>
         </div>
@@ -26,6 +26,31 @@
                 <button type="submit" class="btn-ghost">Delete domain</button>
             </form>
         </div>
+    </div>
+
+    <div class="card mb-6 p-5">
+        <p class="eyebrow">mail client settings</p>
+        <dl class="mt-4 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+                <dt class="text-slate-500">Username</dt>
+                <dd class="mt-1 font-mono text-slate-300">full email address</dd>
+            </div>
+            <div>
+                <dt class="text-slate-500">Incoming · IMAP</dt>
+                <dd class="mt-1 font-mono text-slate-300">{{ $hostname }}:993 · SSL/TLS</dd>
+            </div>
+            <div>
+                <dt class="text-slate-500">Outgoing · SMTP</dt>
+                <dd class="mt-1 font-mono text-slate-300">{{ $hostname }}:465 · SSL/TLS</dd>
+            </div>
+            <div>
+                <dt class="text-slate-500">Alternative SMTP</dt>
+                <dd class="mt-1 font-mono text-slate-300">{{ $hostname }}:587 · STARTTLS</dd>
+            </div>
+        </dl>
+        <p class="mt-4 rounded-md border border-slate-800 bg-[#0a101c] p-3 text-xs leading-relaxed text-slate-500">
+            Use the mailbox password for both protocols. External mail requires this domain's nameservers to be delegated to the panel and your VPS provider to allow port 25. Client submission uses 465 or 587.
+        </p>
     </div>
 
     {{-- Create mailbox --}}
@@ -44,8 +69,8 @@
             <div>
                 <label class="label" for="f-password">Password</label>
                 <input class="input @error('password') border-rose-400 @enderror"
-                       id="f-password" name="password" type="text" required
-                       minlength="8" placeholder="••••••••" value="{{ old('password') }}">
+                       id="f-password" name="password" type="password" required
+                       minlength="8" autocomplete="new-password" placeholder="At least 8 characters">
             </div>
             <div>
                 <label class="label" for="f-description">Description</label>

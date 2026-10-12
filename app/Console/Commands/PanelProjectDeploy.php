@@ -128,6 +128,22 @@ class PanelProjectDeploy extends Command
                     900,
                     $path,
                 );
+
+                // Scripts are disabled so a compromised package cannot execute code
+                // here — rediscover the Laravel package manifest explicitly.
+                if (is_file($path.'/artisan')) {
+                    $this->line('Discovering packages...');
+                    $manifest = $this->command->run(
+                        ['php', 'artisan', 'package:discover', '--ansi', '--no-interaction'],
+                        120,
+                        null,
+                        $path,
+                    );
+
+                    if ($manifest['exit'] !== 0) {
+                        $this->warn('package:discover failed — the app may need it before it can boot.');
+                    }
+                }
             } else {
                 $this->warn('composer is not installed on this server — skipping dependencies.');
             }

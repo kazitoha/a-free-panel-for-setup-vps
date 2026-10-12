@@ -6,6 +6,7 @@ use App\Models\Database;
 use App\Models\User;
 use App\Services\SudoRunner;
 use App\Support\HostCommand;
+use App\Support\SecretInput;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Mockery\MockInterface;
@@ -40,7 +41,8 @@ class DatabaseModuleTest extends TestCase
             ->assertOk()
             ->assertSee('myapp')
             ->assertSee('24 KB')
-            ->assertSee('3');
+            ->assertSee('3')
+            ->assertDontSee('secret1234');
     }
 
     public function test_index_still_renders_when_mysql_is_unreachable(): void
@@ -65,10 +67,10 @@ class DatabaseModuleTest extends TestCase
         $this->partialMock(HostCommand::class, function (MockInterface $mock): void {
             $mock->shouldReceive('run')
                 ->once()
-                ->with([
+                ->withArgs(fn (array $command, float $timeout, ?array $env, ?string $cwd, ?string $input): bool => $command === [
                     'sudo', '-n', '/usr/local/panel/run',
-                    'panel:database:create', 'myapp', 'myapp', 'secret1234',
-                ], 60.0)
+                    'panel:database:create', '--password-stdin', 'myapp', 'myapp',
+                ] && $timeout === 60.0 && $input === "secret1234\n")
                 ->andReturn(['exit' => 0, 'stdout' => "Created myapp.\n", 'stderr' => '']);
         });
 
@@ -166,10 +168,10 @@ class DatabaseModuleTest extends TestCase
         $this->partialMock(HostCommand::class, function (MockInterface $mock): void {
             $mock->shouldReceive('run')
                 ->once()
-                ->with([
+                ->withArgs(fn (array $command, float $timeout, ?array $env, ?string $cwd, ?string $input): bool => $command === [
                     'sudo', '-n', '/usr/local/panel/run',
-                    'panel:database:user-password', 'myapp', 'newsecret5678',
-                ], 60.0)
+                    'panel:database:user-password', '--password-stdin', 'myapp',
+                ] && $timeout === 60.0 && $input === "newsecret5678\n")
                 ->andReturn(['exit' => 0, 'stdout' => "Password updated.\n", 'stderr' => '']);
         });
 
@@ -255,10 +257,12 @@ class DatabaseModuleTest extends TestCase
             $mock->shouldReceive('run')->never();
         });
 
+        $this->fakeSecret('secret1234');
+
         $this->artisan('panel:database:create', [
             'name' => 'bad name;',
             'username' => 'myapp',
-            'password' => 'secret1234',
+            '--password-stdin' => true,
         ])->assertFailed();
     }
 
@@ -268,11 +272,25 @@ class DatabaseModuleTest extends TestCase
             $mock->shouldReceive('run')->never();
         });
 
+        $this->fakeSecret('secret$(id)');
+
         $this->artisan('panel:database:create', [
             'name' => 'myapp',
             'username' => 'myapp',
-            'password' => 'secret$(id)',
+            '--password-stdin' => true,
         ])->assertFailed();
+    }
+
+    public function test_create_command_requires_the_password_on_standard_input(): void
+    {
+        $this->partialMock(HostCommand::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('run')->never();
+        });
+
+        $this->artisan('panel:database:create', [
+            'name' => 'myapp',
+            'username' => 'myapp',
+        ])->expectsOutputToContain('--password-stdin')->assertFailed();
     }
 
     public function test_create_command_creates_the_database_and_user_on_both_hosts(): void
@@ -293,10 +311,12 @@ class DatabaseModuleTest extends TestCase
                 });
         });
 
+        $this->fakeSecret('secret1234');
+
         $this->artisan('panel:database:create', [
             'name' => 'myapp',
             'username' => 'myapp',
-            'password' => 'secret1234',
+            '--password-stdin' => true,
         ])->assertSuccessful();
 
         $this->assertCount(3, $commands);
@@ -316,10 +336,12 @@ class DatabaseModuleTest extends TestCase
                 ->andReturn(['exit' => 0, 'stdout' => "myapp\n", 'stderr' => '']);
         });
 
+        $this->fakeSecret('secret1234');
+
         $this->artisan('panel:database:create', [
             'name' => 'myapp',
             'username' => 'myapp',
-            'password' => 'secret1234',
+            '--password-stdin' => true,
         ])->expectsOutputToContain('already exists')->assertFailed();
     }
 
@@ -360,5 +382,15 @@ class DatabaseModuleTest extends TestCase
         $this->artisan('panel:database:list')
             ->expectsOutputToContain('MySQL is not reachable')
             ->assertFailed();
+    }
+
+    /**
+     * Supply the password the command would otherwise read from the real stdin.
+     */
+    private function fakeSecret(string $value): void
+    {
+        $this->mock(SecretInput::class, function (MockInterface $mock) use ($value): void {
+            $mock->shouldReceive('read')->andReturn($value);
+        });
     }
 }

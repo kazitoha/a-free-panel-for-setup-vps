@@ -41,6 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/kazitoha/a-free-panel-for-setup-vps
 - If a panel already exists in `/var/www/panel`, the installer asks what to do — **update** (default: keep it and fast-forward), **overwrite** (delete the whole project and reinstall; the `.env` and database are backed up to `/root/panel-backups/overwrite-<time>` first), **skip** (leave the code as it is). For the last two, pass `--code=overwrite` / `--code=skip` in piped mode
 - `--repo` must be a full URL (`https://github.com/…`, `git@host:path`, or a local path). If you pass the `owner/repo` shorthand, the installer stops early and shows the exact form to use (e.g. `--repo=https://github.com/owner/repo`)
 - Admin credentials can be retrieved later: `/root/.panel-secrets` contains `PANEL_ADMIN_EMAIL` / `PANEL_ADMIN_PASSWORD` (chmod 600)
+- MySQL root password: on a fresh server a random one is generated and set for you. If MySQL is already secured (for example by an earlier setup script), the installer unlocks it via `/root/.panel-secrets`, Debian's `/etc/mysql/debian.cnf`, or an interactive prompt — otherwise it stops with the exact command to re-run, passing `--mysql-password='<current mysql root password>'`, which also becomes the stored MySQL root password
 
 Alternative: download the script and run it (interactive wizard):
 

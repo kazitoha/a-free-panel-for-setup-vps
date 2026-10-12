@@ -22,13 +22,11 @@ class SudoRunner
      */
     public function run(array $panelArguments, float $timeout = 120.0, ?string $input = null): array
     {
-        $result = $this->command->run(
-            ['sudo', '-n', self::WRAPPER, ...$panelArguments],
-            $timeout,
-            null,
-            null,
-            $input,
-        );
+        $command = ['sudo', '-n', self::WRAPPER, ...$panelArguments];
+
+        $result = $input === null
+            ? $this->command->run($command, $timeout)
+            : $this->command->run($command, $timeout, null, null, $input);
 
         $combined = $result['stderr'].$result['stdout'];
         $result['denied'] = $result['exit'] === 77

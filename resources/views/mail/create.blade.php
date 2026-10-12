@@ -28,6 +28,8 @@
             MX → <span class="font-mono text-slate-400">{{ $hostname }}</span>,
             SPF, DMARC and a fresh DKIM key automatically (PowerDns provider).
             Certificates use DNS-01, so no port conflicts with Caddy.
+            After creating the domain, delegate it to ns1.{{ config('panel.domain') }} and ns2.{{ config('panel.domain') }} at your registrar.
+            Your VPS provider must also allow SMTP port 25 for mail delivery.
         </p>
 
         <div class="mt-4 flex gap-3">

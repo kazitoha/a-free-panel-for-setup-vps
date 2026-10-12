@@ -482,7 +482,7 @@ class PanelStalwartInstall extends Command
 
     private function openMailPorts(): void
     {
-        foreach (['25/tcp', '465/tcp', '993/tcp', '995/tcp', '4190/tcp'] as $port) {
+        foreach (['25/tcp', '465/tcp', '587/tcp', '993/tcp', '995/tcp', '4190/tcp'] as $port) {
             $result = $this->command->run(['ufw', 'allow', $port], 15);
 
             if ($result['exit'] !== 0) {

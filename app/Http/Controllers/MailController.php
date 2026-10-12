@@ -151,6 +151,7 @@ class MailController extends Controller
         return view('mail.show', [
             'domain' => $data,
             'mailboxes' => $mailboxes,
+            'hostname' => $this->mail->hostname(),
             'webUrl' => 'https://'.$this->mail->hostname(),
         ]);
     }

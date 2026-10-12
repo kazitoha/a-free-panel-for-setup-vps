@@ -52,7 +52,7 @@
                     </div>
                     <div class="flex justify-between gap-4">
                         <dt class="text-slate-500">Ports</dt>
-                        <dd class="font-mono text-slate-300">25 · 465 · 993 · 995 · 4190</dd>
+                        <dd class="font-mono text-slate-300">25 · 465 · 587 · 993 · 995 · 4190</dd>
                     </div>
                 </dl>
             </div>
@@ -154,7 +154,7 @@
                     </div>
                     <div class="flex justify-between gap-4">
                         <dt class="text-slate-500">Ports</dt>
-                        <dd class="font-mono text-slate-300">25 · 465 · 993 · 995 · 4190</dd>
+                        <dd class="font-mono text-slate-300">25 · 465 · 587 · 993 · 995 · 4190</dd>
                     </div>
                 </dl>
             </div>
@@ -175,8 +175,8 @@
 
                 <p class="mt-4 rounded-md border border-slate-800 bg-[#0a101c] p-3 text-xs leading-relaxed text-slate-500">
                     DNS: <span class="font-mono text-slate-400">mail.{{ config('panel.domain') }}</span>
-                    must point at this server for certificates and MX. Ports 25/465/993/995/4190
-                    must be open at your provider.
+                    must point at this server for certificates and MX. Open ports 25/465/587/993
+                    at your VPS provider. Port 25 must be allowed for inbound and outbound mail.
                 </p>
             </div>
         </div>
@@ -217,7 +217,7 @@
                                     <span class="badge badge-slate ml-2">disabled</span>
                                 @endunless
                             </td>
-                            <td class="font-mono text-xs text-slate-500">mail.{{ $domain['name'] }}</td>
+                            <td class="font-mono text-xs text-slate-500">{{ $hostname }}</td>
                             <td>
                                 <div class="flex justify-end gap-2">
                                     <a href="{{ route('mail.show', $domain['id']) }}" class="btn-ghost">Open</a>

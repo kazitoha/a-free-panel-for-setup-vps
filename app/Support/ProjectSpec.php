@@ -152,13 +152,13 @@ class ProjectSpec
      */
     private static function repoHost(string $repo): ?string
     {
-        if (preg_match('#^(?:https?|ssh)://(?:[^/@]*@)?(\[[^\]]+\]|[^/:?#]+)#i', $repo, $matches) === 1) {
+        if (preg_match('~^(?:https?|ssh)://(?:[^/@]*@)?(\[[^\]]+\]|[^/:?#]+)~i', $repo, $matches) === 1) {
             $host = $matches[1];
 
             return str_starts_with($host, '[') ? substr($host, 1, -1) : $host;
         }
 
-        if (preg_match('#^[^@/:]+@([^/:?#]+)#', $repo, $matches) === 1) {
+        if (preg_match('~^[^@/:]+@([^/:?#]+)~', $repo, $matches) === 1) {
             return $matches[1];
         }
 

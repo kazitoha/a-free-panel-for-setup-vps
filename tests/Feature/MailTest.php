@@ -304,7 +304,13 @@ class MailTest extends TestCase
             ->get(route('mail.show', '5'))
             ->assertOk()
             ->assertSee('hello@example.com')
-            ->assertSee('Sales inbox');
+            ->assertSee('Sales inbox')
+            ->assertSee('MX → mail.panel.example.com')
+            ->assertSee('Incoming · IMAP')
+            ->assertSee('mail.panel.example.com:993 · SSL/TLS')
+            ->assertSee('mail.panel.example.com:465 · SSL/TLS')
+            ->assertSee('mail.panel.example.com:587 · STARTTLS')
+            ->assertSee('nameservers to be delegated');
     }
 
     public function test_creating_a_mailbox_sends_the_password_credential(): void

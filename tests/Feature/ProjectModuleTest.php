@@ -113,6 +113,60 @@ class ProjectModuleTest extends TestCase
         $this->assertDatabaseCount('projects', 0);
     }
 
+    public function test_store_rejects_repository_hosts_inside_private_networks(): void
+    {
+        $this->partialMock(HostCommand::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('run')->never();
+        });
+
+        $blocked = [
+            'https://127.0.0.1/user/myapp.git',
+            'https://10.1.2.3/user/myapp.git',
+            'http://169.254.169.254/latest/meta-data',
+            'https://localhost/user/myapp.git',
+            'https://panel.internal/user/myapp.git',
+            'git@gitlab.internal:user/myapp.git',
+        ];
+
+        foreach ($blocked as $index => $repo) {
+            $this->actingAs(User::factory()->create())
+                ->from(route('projects.create'))
+                ->post(route('projects.store'), [
+                    'name' => "myapp{$index}",
+                    'repo_url' => $repo,
+                    'branch' => 'main',
+                    'domain' => "myapp{$index}.example.com",
+                    'php_version' => '8.3',
+                ])
+                ->assertSessionHasErrors('repo_url');
+        }
+
+        $this->assertDatabaseCount('projects', 0);
+    }
+
+    public function test_store_accepts_a_public_ssh_repository_url(): void
+    {
+        $this->partialMock(HostCommand::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('run')
+                ->once()
+                ->withArgs(fn (array $command): bool => str_contains($command[2] ?? '', 'panel:project:deploy'))
+                ->andReturn(['exit' => 0, 'stdout' => '', 'stderr' => '']);
+        });
+
+        $this->actingAs(User::factory()->create())
+            ->from(route('projects.create'))
+            ->post(route('projects.store'), [
+                'name' => 'myapp',
+                'repo_url' => 'git@github.com:user/myapp.git',
+                'branch' => 'main',
+                'domain' => 'myapp.example.com',
+                'php_version' => '8.3',
+            ])
+            ->assertRedirect();
+
+        $this->assertSame('git@github.com:user/myapp.git', Project::firstOrFail()->repo_url);
+    }
+
     public function test_store_rejects_a_reserved_name(): void
     {
         $this->actingAs(User::factory()->create())
