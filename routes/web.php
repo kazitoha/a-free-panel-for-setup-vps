@@ -17,6 +17,7 @@ use App\Http\Controllers\PhpController;
 use App\Http\Controllers\PmaController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ServiceController;
+use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SetupController;
 use App\Http\Controllers\UpdateController;
 use Illuminate\Support\Facades\Route;
@@ -199,6 +200,11 @@ Route::middleware(['auth', 'admin', 'setup.complete'])->group(function () {
     Route::post('/update/run', [UpdateController::class, 'run'])
         ->middleware('throttle:2,1')
         ->name('update.run');
+
+    Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
+    Route::post('/settings/reset', [SettingsController::class, 'reset'])
+        ->middleware('throttle:2,1')
+        ->name('settings.reset');
 
     Route::get('/phpmyadmin', [PmaController::class, 'index'])->name('pma.index');
     Route::post('/phpmyadmin/install', [PmaController::class, 'install'])

@@ -73,7 +73,10 @@
                class="nav-link {{ request()->routeIs('cron.*') ? 'nav-link-active' : '' }}">
                 <span aria-hidden="true">⏱</span> Cron jobs
             </a>
-            <span class="nav-link nav-link-disabled"><span aria-hidden="true">⚙</span> Settings <em class="soon">soon</em></span>
+            <a href="{{ route('settings.index') }}"
+               class="nav-link {{ request()->routeIs('settings.*') ? 'nav-link-active' : '' }}">
+                <span aria-hidden="true">⚙</span> Settings
+            </a>
 
             <div class="mt-auto border-t border-slate-800 p-3">
                 <form method="POST" action="{{ route('logout') }}">

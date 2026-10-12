@@ -35,8 +35,9 @@ class ServiceController extends Controller
             return back()->with('error', SudoRunner::denialMessage());
         }
 
-        $detail = trim($result['stdout'].$result['stderr']);
-        $detail = $detail !== '' ? mb_substr($detail, 0, 300) : "systemctl exited with code {$result['exit']}.";
+        $detail = trim($result['stderr'].$result['stdout']);
+        $detail = preg_replace('/[ \t]*\n+[ \t]*/', ' · ', $detail) ?? '';
+        $detail = $detail !== '' ? mb_substr($detail, 0, 1200) : "systemctl exited with code {$result['exit']}.";
 
         return back()->with('error', "Could not restart {$unit}: {$detail}");
     }

@@ -21,6 +21,8 @@
         <div class="flex gap-2">
             @if ($install->type === 'update')
                 <a href="{{ route('dashboard') }}" class="btn-ghost">Back to Dashboard</a>
+            @elseif ($install->type === 'reset')
+                <a href="{{ route('settings.index') }}" class="btn-ghost">Back to Settings</a>
             @elseif ($install->type === 'pma')
                 <a href="{{ route('pma.index') }}" class="btn-ghost">Back to phpMyAdmin</a>
             @elseif ($install->type === 'php')

@@ -112,6 +112,35 @@
     color: #e2e8f0;
 }
 
+.btn-danger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 0.5rem;
+    border: 1px solid rgba(251, 113, 133, 0.5);
+    background: rgba(225, 29, 72, 0.12);
+    padding: 0.55rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #fda4af;
+    transition: background 120ms ease, border-color 120ms ease;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: rgba(225, 29, 72, 0.25);
+    border-color: #fb7185;
+}
+
+.btn-danger:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+}
+
+.btn-danger:focus-visible {
+    outline: 2px solid #fb7185;
+    outline-offset: 2px;
+}
+
 .mono-chip {
     display: inline-flex;
     align-items: center;

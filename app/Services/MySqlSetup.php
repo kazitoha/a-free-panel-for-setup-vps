@@ -129,8 +129,20 @@ class MySqlSetup
         }
 
         if (! $this->socketReady()) {
-            throw new RuntimeException('MySQL did not open '.self::SOCKET.' — see /var/log/mysql/error.log.');
+            throw new RuntimeException('MySQL did not open '.self::SOCKET.'.'.$this->errorLogTail().' See /var/log/mysql/error.log.');
         }
+    }
+
+    /**
+     * The last lines MySQL wrote to its own error log, so a failure to come up
+     * says why (a config error, a port clash, an out-of-memory kill) instead
+     * of only "the socket never appeared".
+     */
+    private function errorLogTail(): string
+    {
+        $result = $this->command->run(['tail', '-n', '8', '/var/log/mysql/error.log'], 10.0);
+
+        return $this->detail($result);
     }
 
     private function socketReady(): bool
@@ -220,15 +232,21 @@ class MySqlSetup
             throw new RuntimeException('Could not write '.$config.'.');
         }
 
-        $this->command->run(['systemctl', 'restart', 'mysql'], 180.0);
-        $this->waitForSocket(static fn () => null);
+        $result = ['exit' => 1, 'stdout' => '', 'stderr' => 'MySQL did not come up with its grant tables disabled.'];
 
-        $sql = "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED BY ".MySql::literal($newPassword).';';
-        $result = $this->runSql($sql, null);
+        try {
+            $this->command->run(['systemctl', 'restart', 'mysql'], 180.0);
+            $this->waitForSocket(static fn () => null);
 
-        @unlink($config);
+            $sql = "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED BY ".MySql::literal($newPassword).';';
+            $result = $this->runSql($sql, null);
+        } finally {
+            // Never leave skip-grant-tables behind: it disables MySQL's own
+            // authentication for every restart that follows.
+            @unlink($config);
+            $this->command->run(['systemctl', 'restart', 'mysql'], 180.0);
+        }
 
-        $this->command->run(['systemctl', 'restart', 'mysql'], 180.0);
         $this->waitForSocket(static fn () => null);
 
         if ($result['exit'] !== 0) {

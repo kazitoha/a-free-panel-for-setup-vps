@@ -83,10 +83,19 @@ class PanelPhpInstall extends Command
             $this->line("PHP {$version} is already present — refreshing its packages...");
         }
 
-        if ($this->command->run(['apt-cache', 'show', 'php'.$version.'-fpm'], 30.0)['exit'] !== 0) {
+        if (! $this->hasPackage('php'.$version.'-fpm')) {
             $this->line('Adding the Ondrej PHP repository...');
             $this->mustRun(['add-apt-repository', '-y', 'ppa:ondrej/php']);
-            $this->mustRun(['apt-get', 'update']);
+        }
+
+        $this->line('Refreshing the package lists...');
+        $this->mustRun(['apt-get', 'update', '-qq']);
+
+        if (! $this->hasPackage('php'.$version.'-fpm')) {
+            throw new RuntimeException(
+                "PHP {$version} is not available from the configured repositories — "
+                .'it may not be published for this Ubuntu release.'
+            );
         }
 
         $this->line("Installing PHP {$version}...");
@@ -112,20 +121,62 @@ class PanelPhpInstall extends Command
     }
 
     /**
+     * Whether apt knows a package with an installable candidate.
+     */
+    private function hasPackage(string $package): bool
+    {
+        return $this->command->run(['apt-cache', 'show', $package], 30.0)['exit'] === 0;
+    }
+
+    /**
      * @param  list<string>  $command
      */
     private function mustRun(array $command): void
     {
         $result = $this->command->run($command, 900.0, ['DEBIAN_FRONTEND' => 'noninteractive']);
 
-        if ($result['exit'] !== 0) {
-            $detail = trim($result['stderr'].$result['stdout']);
-
-            throw new RuntimeException(
-                'Command failed: '.implode(' ', $command)
-                .($detail !== '' ? ' — '.mb_substr($detail, 0, 400) : '')
-            );
+        if ($result['exit'] === 0) {
+            return;
         }
+
+        $message = 'Command failed: '.implode(' ', $command);
+        $detail = $this->failureDetail($result['stdout'], $result['stderr']);
+
+        if ($detail !== '') {
+            $message .= ' — '.$detail;
+        }
+
+        throw new RuntimeException($message);
+    }
+
+    /**
+     * The tail of apt's error channel is where the real reason lives. Its
+     * start is often a wall of "No apport report written" notices from
+     * crashed maintainer scripts, which pushes the actual error out of view.
+     */
+    private function failureDetail(string $stdout, string $stderr): string
+    {
+        $lines = $this->meaningfulLines($stderr);
+
+        if ($lines === []) {
+            $lines = $this->meaningfulLines($stdout);
+        }
+
+        return mb_substr(implode(' / ', array_slice($lines, -6)), 0, 400);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function meaningfulLines(string $output): array
+    {
+        $lines = preg_split('/\r?\n/', $output) ?: [];
+
+        return array_values(array_filter(
+            $lines,
+            fn (string $line): bool => trim($line) !== ''
+                && ! str_contains($line, 'apport report written'),
+        ));
     }
 
     private function markFailed(Install $install, string $message): void
